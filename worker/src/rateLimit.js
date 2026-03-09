@@ -7,18 +7,19 @@ const LIMITS = {
     searchQueries: 50,
 };
 
-export const checkAndIncrement = async (accountId, action) => {
-    const dateStr = new Date().toISOString().split('T')[0];
-    const key = `ratelimit:${accountId}:${action}:${dateStr}`;
-
-    const luaScript = `
+const INCR_WITH_EXPIRE_LUA = `
   local current = redis.call('INCR', KEYS[1])
   if current == 1 then
     redis.call('EXPIRE', KEYS[1], 86400)
   end
   return current
 `;
-    const current = await redis.eval(luaScript, 1, key);
+
+export const checkAndIncrement = async (accountId, action) => {
+    const dateStr = new Date().toISOString().split('T')[0];
+    const key = `ratelimit:${accountId}:${action}:${dateStr}`;
+
+    const current = await redis.eval(INCR_WITH_EXPIRE_LUA, 1, key);
 
     const limit = LIMITS[action] || 0;
     if (current > limit) {

@@ -7,7 +7,7 @@ import { addJob, getJobStatus } from '../queue.js';
 const router = Router();
 
 router.post('/send', authMiddleware, validateBody(Joi.object({
-    accountId: Joi.string().required(),
+    accountId: Joi.string().pattern(/^[a-zA-Z0-9_-]{1,128}$/).required(),
     recipientProfileUrl: Joi.string().uri().required(),
     message: Joi.string().min(1).max(300).required(),
     proxyUrl: Joi.string().uri().optional()
@@ -21,7 +21,7 @@ router.post('/send', authMiddleware, validateBody(Joi.object({
 });
 
 router.post('/read', authMiddleware, validateBody(Joi.object({
-    accountId: Joi.string().required(),
+    accountId: Joi.string().pattern(/^[a-zA-Z0-9_-]{1,128}$/).required(),
     proxyUrl: Joi.string().uri().optional()
 })), async (req, res, next) => {
     try {

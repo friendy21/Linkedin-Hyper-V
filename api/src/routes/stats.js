@@ -92,6 +92,9 @@ router.get('/all/summary', authMiddleware, async (req, res, next) => {
 router.get('/:accountId/summary', authMiddleware, async (req, res, next) => {
     try {
         const { accountId } = req.params;
+        if (!/^[a-zA-Z0-9_-]{1,128}$/.test(accountId)) {
+            return res.status(400).json({ error: 'Invalid accountId format' });
+        }
         const summary = await buildSummary(accountId);
         res.json(summary);
     } catch (err) {
@@ -102,6 +105,9 @@ router.get('/:accountId/summary', authMiddleware, async (req, res, next) => {
 router.get('/:accountId/activity', authMiddleware, async (req, res, next) => {
     try {
         const { accountId } = req.params;
+        if (!/^[a-zA-Z0-9_-]{1,128}$/.test(accountId)) {
+            return res.status(400).json({ error: 'Invalid accountId format' });
+        }
         const { action, from, to } = req.query;
 
         if (!action || !['messageSent', 'connectionSent', 'profileViewed'].includes(action)) {

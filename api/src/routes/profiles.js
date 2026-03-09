@@ -7,7 +7,7 @@ import { addJob, getJobStatus } from '../queue.js';
 const router = Router();
 
 router.post('/scrape', authMiddleware, validateBody(Joi.object({
-    accountId: Joi.string().required(),
+    accountId: Joi.string().pattern(/^[a-zA-Z0-9_-]{1,128}$/).required(),
     profileUrl: Joi.string().uri().required(),
     proxyUrl: Joi.string().uri().optional()
 })), async (req, res, next) => {
