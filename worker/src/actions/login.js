@@ -14,7 +14,13 @@ const logger = winston.createLogger({
  * @param {Object} params
  * @returns {Object}
  */
-export const login = async ({ accountId, email, password, proxyUrl }) => {
+export const login = async ({ accountId, email, password, proxyUrl }, job = null) => {
+    // Redact credentials from job data reference so they don't persist in Redis on failure
+    if (job && job.data) {
+        delete job.data.email;
+        delete job.data.password;
+    }
+
     let browser, context;
     try {
         browser = await createBrowser(proxyUrl);

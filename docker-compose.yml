@@ -21,7 +21,7 @@ services:
   api:
     build: ./api
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     environment:
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
       - API_SECRET=${API_SECRET}

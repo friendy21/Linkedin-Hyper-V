@@ -169,7 +169,7 @@ export function generateOutreachMessage(opts = {}) {
         selectRandom(CLOSINGS)
     ];
 
-    let message = parts, msg = parts.join(' ');
+    let msg = parts.join(' ');
     msg = render(msg, vars);
     return enforceLimit(msg);
 }

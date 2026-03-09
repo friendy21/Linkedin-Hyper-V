@@ -1,4 +1,11 @@
 import redis from './redisClient.js';
+import winston from 'winston';
+
+const logger = winston.createLogger({
+    level: 'info',
+    format: winston.format.json(),
+    transports: [new winston.transports.Console()],
+});
 
 export const logMessageSent = async (accountId, recipientProfileUrl, messagePreview, jobId) => {
     try {
@@ -13,7 +20,7 @@ export const logMessageSent = async (accountId, recipientProfileUrl, messagePrev
         await redis.zadd(key, Date.now(), JSON.stringify(member));
         await redis.expire(key, 7776000);
     } catch (err) {
-        // silently swallow
+        logger.warn({ msg: '[activityLogger] Failed to log activity', error: err.message });
     }
 };
 
@@ -30,7 +37,7 @@ export const logConnectionSent = async (accountId, profileUrl, notePreview, jobI
         await redis.zadd(key, Date.now(), JSON.stringify(member));
         await redis.expire(key, 7776000);
     } catch (err) {
-        // silently swallow
+        logger.warn({ msg: '[activityLogger] Failed to log activity', error: err.message });
     }
 };
 
@@ -46,6 +53,6 @@ export const logProfileViewed = async (accountId, profileUrl, jobId) => {
         await redis.zadd(key, Date.now(), JSON.stringify(member));
         await redis.expire(key, 7776000);
     } catch (err) {
-        // silently swallow
+        logger.warn({ msg: '[activityLogger] Failed to log activity', error: err.message });
     }
 };

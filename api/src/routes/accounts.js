@@ -7,6 +7,9 @@ const router = Router();
 router.post('/:accountId/session', authMiddleware, async (req, res, next) => {
     try {
         const { accountId } = req.params;
+        if (!/^[a-zA-Z0-9_-]{1,128}$/.test(accountId)) {
+            return res.status(400).json({ error: 'Invalid accountId format' });
+        }
         const { cookies } = req.body;
         if (!Array.isArray(cookies)) {
             return res.status(400).json({ error: 'cookies must be an array' });
@@ -28,6 +31,9 @@ const LIMITS = {
 router.get('/:accountId/limits', authMiddleware, async (req, res, next) => {
     try {
         const { accountId } = req.params;
+        if (!/^[a-zA-Z0-9_-]{1,128}$/.test(accountId)) {
+            return res.status(400).json({ error: 'Invalid accountId format' });
+        }
         const limits = {};
         const actions = ['profileView', 'messagesSent', 'connectRequests', 'searchQueries'];
         const dateStr = new Date().toISOString().split('T')[0];
@@ -50,6 +56,9 @@ router.get('/:accountId/limits', authMiddleware, async (req, res, next) => {
 router.delete('/:accountId/session', authMiddleware, async (req, res, next) => {
     try {
         const { accountId } = req.params;
+        if (!/^[a-zA-Z0-9_-]{1,128}$/.test(accountId)) {
+            return res.status(400).json({ error: 'Invalid accountId format' });
+        }
         await redis.del(`session:${accountId}`, `session:meta:${accountId}`);
         res.json({ success: true });
     } catch (err) {
@@ -60,6 +69,9 @@ router.delete('/:accountId/session', authMiddleware, async (req, res, next) => {
 router.get('/:accountId/session/status', authMiddleware, async (req, res, next) => {
     try {
         const { accountId } = req.params;
+        if (!/^[a-zA-Z0-9_-]{1,128}$/.test(accountId)) {
+            return res.status(400).json({ error: 'Invalid accountId format' });
+        }
         const raw = await redis.get('session:meta:' + accountId);
         if (!raw) {
             return res.json({ exists: false });

@@ -15,7 +15,7 @@ const queryCounts = async (key) => {
     const [allTime, today, yesterday, last7days, last30days] = await Promise.all([
         redis.zcard(key),
         redis.zcount(key, startOfTodayMs(), '+inf'),
-        redis.zcount(key, msAgo(2), startOfTodayMs() - 1),
+        redis.zcount(key, startOfTodayMs() - 86400000, startOfTodayMs() - 1),
         redis.zcount(key, msAgo(7), '+inf'),
         redis.zcount(key, msAgo(30), '+inf'),
     ]);
@@ -33,7 +33,13 @@ const buildSummary = async (accountId) => {
 
 router.get('/all/summary', authMiddleware, async (req, res, next) => {
     try {
-        const keys = await redis.keys('activity:*:messageSent');
+        const keys = [];
+        let cursor = '0';
+        do {
+            const [nextCursor, batch] = await redis.scan(cursor, 'MATCH', 'activity:*:messageSent', 'COUNT', 100);
+            cursor = nextCursor;
+            keys.push(...batch);
+        } while (cursor !== '0');
         const accountIds = new Set();
         for (const key of keys) {
             const parts = key.split(':');

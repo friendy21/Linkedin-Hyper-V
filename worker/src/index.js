@@ -19,7 +19,7 @@ const worker = new Worker('linkedin-jobs', async job => {
     logger.info({ msg: `[worker] Job ${job.id} (${job.name}) started`, accountId: job.data.accountId });
     switch (job.name) {
         case 'login':
-            return await login(job.data);
+            return await login(job.data, job);
         case 'sendMessage':
             return await sendMessage({ ...job.data, _jobId: job.id });
         case 'readMessages':
