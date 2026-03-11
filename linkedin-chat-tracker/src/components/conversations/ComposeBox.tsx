@@ -73,11 +73,20 @@ export function ComposeBox({ conversationId, accountId, contact }: ComposeBoxPro
     if (!contact?.fullName) return
     setIsGenerating(true)
     try {
-      // Mock AI generation
-      await new Promise(r => setTimeout(r, 1500))
-      setText(`Hi ${contact.fullName.split(' ')[0]},\n\nI came across your profile and would love to connect. I'm impressed by your background and think it would be great to stay in touch.`)
+      const res = await fetch('/api/messages/generate-note', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          accountId,
+          recipientName: contact.fullName,
+          recipientProfileUrl: contact.profileUrl,
+        }),
+      })
+      if (!res.ok) throw new Error(`AI generation failed: ${res.status}`)
+      const data = await res.json()
+      setText(data.note ?? data.message ?? '')
     } catch (e) {
-      console.error(e)
+      console.error('[ComposeBox] AI generation error:', e)
     } finally {
       setIsGenerating(false)
     }

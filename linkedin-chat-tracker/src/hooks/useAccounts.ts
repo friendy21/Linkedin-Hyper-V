@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { LinkedInAccount } from '@/types'
+import { toast } from 'sonner'
 
 export function useAccounts() {
   return useQuery<LinkedInAccount[]>({
@@ -62,11 +63,10 @@ export function useDisconnectAccount() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['accounts'] })
-      // In a real app we would use toast here: toast.success('Account disconnected')
+      toast.success('Account disconnected')
     },
     onError: (error: Error) => {
-      // toast.error(error.message)
-      console.error(error.message)
+      toast.error(error.message || 'Failed to disconnect account')
     }
   })
 }
