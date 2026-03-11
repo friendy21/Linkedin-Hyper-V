@@ -1,5 +1,6 @@
 import Image from 'next/image';
 import { getAuthors } from '@/lib/strapi';
+import type { StrapiData, StrapiAuthorAttributes } from '@/lib/strapi';
 
 export const metadata = {
   title: 'Authors | RegulateThis',
@@ -7,7 +8,8 @@ export const metadata = {
 };
 
 export default async function AuthorsPage() {
-  const authors = await getAuthors();
+  const authorsResponse = await getAuthors();
+  const authors: StrapiData<StrapiAuthorAttributes>[] = authorsResponse.data ?? [];
 
   return (
     <div className="min-h-screen bg-gray-50 py-12 md:py-20 text-gray-900">
@@ -19,10 +21,10 @@ export default async function AuthorsPage() {
           <p className="text-gray-500">No authors found.</p>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
-            {authors.map((author: any) => {
-              // Note: using placeholder image if avatar is missing
-              const avatarUrl = author.avatar?.url
-                ? author.avatar.url
+            {authors.map((author: StrapiData<StrapiAuthorAttributes>) => {
+              const attrs = author.attributes;
+              const avatarUrl = attrs.photo?.data?.attributes?.url
+                ? attrs.photo.data.attributes.url
                 : 'https://placehold.co/400x400/49648C/FFFFFF?text=Author';
               
               return (
@@ -30,18 +32,18 @@ export default async function AuthorsPage() {
                   <div className="relative w-24 h-24 rounded-full overflow-hidden mb-4 bg-gray-100 flex-shrink-0">
                      <Image
                       src={avatarUrl}
-                      alt={author.name}
+                      alt={attrs.name}
                       fill
                       className="object-cover"
                     />
                   </div>
-                  <h3 className="text-2xl font-bold mb-1 text-[#0B1F3B]">{author.name}</h3>
-                  {author.title && (
-                    <p className="text-[#49648C] font-medium mb-4">{author.title}</p>
+                  <h3 className="text-2xl font-bold mb-1 text-[#0B1F3B]">{attrs.name}</h3>
+                  {attrs.title && (
+                    <p className="text-[#49648C] font-medium mb-4">{attrs.title}</p>
                   )}
-                  {author.bio && (
+                  {attrs.bio && (
                     <p className="text-gray-600 text-sm line-clamp-3 leading-relaxed">
-                      {author.bio}
+                      {attrs.bio}
                     </p>
                   )}
                 </div>

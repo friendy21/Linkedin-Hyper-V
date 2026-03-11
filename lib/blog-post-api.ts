@@ -26,11 +26,15 @@ const TENANT_SLUG = process.env.NEXT_PUBLIC_TENANT_SLUG || '';
  * Helper function to handle fetch requests with proper error handling and headers.
  * Automatically injects X-Tenant-Slug on server-side calls for tenant scoping.
  */
-async function fetchAPI<T>(path: string, urlParamsObject = {}, options: any = {}): Promise<T> {
+async function fetchAPI<T>(path: string, urlParamsObject = {}, options: RequestInit = {}): Promise<T> {
     try {
+        const existingHeaders = options.headers instanceof Headers
+            ? Object.fromEntries((options.headers as Headers).entries())
+            : (options.headers as Record<string, string> | undefined) ?? {};
+
         const headers: Record<string, string> = {
             'Content-Type': 'application/json',
-            ...options.headers,
+            ...existingHeaders,
         };
 
         // Server-side only: Use the private API token + tenant slug header
@@ -45,9 +49,9 @@ async function fetchAPI<T>(path: string, urlParamsObject = {}, options: any = {}
         }
 
         // Merge default and user options
-        const mergedOptions = {
-            headers,
+        const mergedOptions: RequestInit = {
             ...options,
+            headers,
         };
 
         // Build request URL

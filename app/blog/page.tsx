@@ -1,6 +1,7 @@
 import Image from 'next/image';
 import Link from 'next/link';
 import { getRecentArticles, getStrapiMediaUrl } from '@/lib/strapi';
+import type { StrapiData, StrapiArticleAttributes } from '@/lib/strapi';
 
 export const metadata = {
   title: 'Blog | RegulateThis',
@@ -19,10 +20,11 @@ export default async function BlogPage({
   // but we can slice the array or assume it accepts limit param. Based on instruction: "Fetch from getRecentArticles(30)."
   const allArticles = await getRecentArticles(30);
   
-  let filteredArticles = allArticles;
+  let filteredArticles: StrapiData<StrapiArticleAttributes>[] = allArticles;
   if (pillar) {
-    filteredArticles = allArticles.filter((article: any) => 
-      article.pillar?.slug === pillar || article.pillar?.name?.toLowerCase().includes(pillar.toLowerCase())
+    filteredArticles = allArticles.filter((article: StrapiData<StrapiArticleAttributes>) => 
+      article.attributes.pillar?.data?.attributes?.slug === pillar || 
+      article.attributes.pillar?.data?.attributes?.name?.toLowerCase().includes(pillar.toLowerCase())
     );
   }
 
@@ -40,31 +42,41 @@ export default async function BlogPage({
           <p className="text-gray-500">No articles found.</p>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-            {currentArticles.map((article: any) => (
-              <Link href={`/article/${article.slug}`} key={article.id} className="group flex flex-col bg-white rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow">
-                <div className="relative aspect-video w-full overflow-hidden bg-gray-200">
-                  {article.coverImage?.url ? (
-                    <Image
-                      src={getStrapiMediaUrl(article.coverImage.url) || ''}
-                      alt={article.coverImage.alternativeText || article.title}
-                      fill
-                      className="object-cover group-hover:scale-105 transition-transform duration-300"
-                    />
-                  ) : null}
-                </div>
-                <div className="p-6 flex flex-col flex-grow">
-                  <h3 className="text-xl font-bold mb-2 group-hover:text-[#49648C] transition-colors line-clamp-2">
-                    {article.title}
-                  </h3>
-                  <p className="text-gray-600 line-clamp-2 mb-4 flex-grow">
-                    {article.excerpt}
-                  </p>
-                  <p className="text-sm text-gray-500 font-medium">
-                    {article.readTime ? `${article.readTime} min read` : '5 min read'}
-                  </p>
-                </div>
-              </Link>
-            ))}
+            {currentArticles.map((article: StrapiData<StrapiArticleAttributes>) => {
+              const attrs = article.attributes;
+              const imageUrl = attrs.featuredImage?.data?.attributes?.url
+                ? getStrapiMediaUrl(attrs.featuredImage.data.attributes.url)
+                : null;
+              const imageAlt = attrs.featuredImage?.data?.attributes?.url
+                ? (attrs.title)
+                : attrs.title;
+
+              return (
+                <Link href={`/article/${attrs.slug}`} key={article.id} className="group flex flex-col bg-white rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow">
+                  <div className="relative aspect-video w-full overflow-hidden bg-gray-200">
+                    {imageUrl ? (
+                      <Image
+                        src={imageUrl}
+                        alt={imageAlt}
+                        fill
+                        className="object-cover group-hover:scale-105 transition-transform duration-300"
+                      />
+                    ) : null}
+                  </div>
+                  <div className="p-6 flex flex-col flex-grow">
+                    <h3 className="text-xl font-bold mb-2 group-hover:text-[#49648C] transition-colors line-clamp-2">
+                      {attrs.title}
+                    </h3>
+                    <p className="text-gray-600 line-clamp-2 mb-4 flex-grow">
+                      {attrs.excerpt}
+                    </p>
+                    <p className="text-sm text-gray-500 font-medium">
+                      {attrs.readTime ? `${attrs.readTime} min read` : '5 min read'}
+                    </p>
+                  </div>
+                </Link>
+              );
+            })}
           </div>
         )}
 
