@@ -86,10 +86,13 @@ ${recipient.topic ? `Context: ${recipient.topic}.` : ''}
 Max 500 characters. Write ONLY the message text. No quotes, no preamble, sound human.`
 
         const geminiRes = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`,
+          'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent',
           {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+              'Content-Type': 'application/json',
+              'x-goog-api-key': geminiKey,
+            },
             body: JSON.stringify({ contents: [{ parts: [{ text: promptText }] }] }),
           }
         )

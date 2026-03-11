@@ -3,7 +3,7 @@
  * Handles all communication with the Strapi CMS backend
  */
 
-// Runtime config cache
+// Runtime config (Note: serverless cold starts re-initialise modules so this will be null on every cold start)
 let runtimeConfig: { strapiUrl: string } | null = null;
 
 // Get runtime config from API (works both client and server side)
@@ -144,11 +144,16 @@ async function fetchStrapi<T>(
         (headers as Record<string, string>)['Authorization'] = `Bearer ${process.env.STRAPI_API_TOKEN}`;
     }
 
+    // ISR: site-settings revalidate every 60s, all other content every 3600s (1 hour).
+    // Callers can override via options.next.
+    type NextFetchConfig = { revalidate?: number | false; tags?: string[] };
+    const isSiteSetting = endpoint.startsWith('/site-setting');
+    const defaultNext: NextFetchConfig = isSiteSetting ? { revalidate: 60 } : { revalidate: 3600 };
+
     const response = await fetch(`${config.strapiUrl}/api${endpoint}`, {
         ...options,
         headers,
-        // Disable caching to always get fresh data from Strapi
-        cache: 'no-store',
+        next: { ...defaultNext, ...(options as RequestInit & { next?: NextFetchConfig }).next },
     });
 
     if (!response.ok) {

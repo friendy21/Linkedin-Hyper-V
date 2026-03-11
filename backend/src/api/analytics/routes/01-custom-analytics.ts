@@ -12,7 +12,7 @@ export default {
             path: '/analytics/dashboard',
             handler: 'analytics.getDashboardData',
             config: {
-                auth: false, // Public endpoint - no authentication required
+                // No auth: false — default is authenticated. Analytics data is sensitive.
                 policies: [],
                 middlewares: [],
             },

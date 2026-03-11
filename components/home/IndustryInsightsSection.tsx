@@ -1,18 +1,11 @@
-'use client';
-
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { Container } from '@/components/ui/Container';
 import { getIndustryInsightsArticles } from '@/lib/data-service';
-import { Article } from '@/types';
 
-export const IndustryInsightsSection: React.FC = () => {
-    const [articles, setArticles] = useState<Article[]>([]);
-
-    useEffect(() => {
-        getIndustryInsightsArticles(7).then(data => setArticles(data)).catch(() => { });
-    }, []);
+export async function IndustryInsightsSection() {
+    const articles = await getIndustryInsightsArticles(7).catch(() => []);
 
     // Split articles: 1 featured + 6 regular
     const featuredArticle = articles[0];
@@ -149,4 +142,4 @@ export const IndustryInsightsSection: React.FC = () => {
             </Container>
         </section>
     );
-};
+}

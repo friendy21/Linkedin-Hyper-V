@@ -120,9 +120,10 @@ export default {
             });
 
             return transformGAResponse(response);
-        } catch (error: any) {
-            strapi.log.error('Failed to fetch GA4 data:', error.message);
-            throw new Error(`Failed to fetch analytics data: ${error.message}`);
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : 'Unknown error';
+            console.error('Failed to fetch GA4 data:', message);
+            throw new Error('Failed to fetch analytics data');
         }
     },
 };

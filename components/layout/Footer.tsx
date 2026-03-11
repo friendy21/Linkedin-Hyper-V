@@ -3,6 +3,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { Container } from '@/components/ui/Container';
+import { NewsletterForm } from '@/components/forms/NewsletterForm';
 
 export const Footer: React.FC = () => {
     const currentYear = new Date().getFullYear();
@@ -113,19 +114,7 @@ export const Footer: React.FC = () => {
                     <p className="text-sm text-gray-300 mb-4">
                         Get weekly insights delivered to your inbox.
                     </p>
-                    <form className="flex flex-col space-y-2">
-                        <input
-                            type="email"
-                            placeholder="Your email"
-                            className="px-4 py-2 rounded bg-[#0F2A4D] text-white placeholder-gray-400 border border-[#3A5070] focus:outline-none focus:ring-2 focus:ring-[#49648C]"
-                        />
-                        <button
-                            type="submit"
-                            className="px-4 py-2 bg-[#49648C] text-white rounded hover:bg-[#6B82A8] transition-colors"
-                        >
-                            Subscribe
-                        </button>
-                    </form>
+                    <NewsletterForm variant="inline" />
                 </div>
             </div>
 

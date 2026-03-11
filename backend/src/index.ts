@@ -78,12 +78,11 @@ const pillarsData = [
   },
 ];
 
-// Tenant user account definitions
 const tenantUsers = [
   {
     username: 'regulatethis-user',
     email: 'regulatethis-user@regulatethis.com',
-    password: 'RegulateThis123!',
+    password: process.env.SEED_REGULATETHIS_USER_PASSWORD ?? '',
     tenantSlug: 'regulatethis',
     roleName: 'RegulateThis User',
     roleDescription: 'User role scoped to RegulateThis tenant content only',
@@ -91,7 +90,7 @@ const tenantUsers = [
   {
     username: 'sylvan-user',
     email: 'sylvan-user@sylvannotes.com',
-    password: 'Sylvan123!',
+    password: process.env.SEED_SYLVAN_USER_PASSWORD ?? '',
     tenantSlug: 'sylvian',
     roleName: 'Sylvan User',
     roleDescription: 'User role scoped to Sylvan tenant content only',
@@ -99,7 +98,7 @@ const tenantUsers = [
   {
     username: 'glynac-user',
     email: 'glynac-user@glynac.ai',
-    password: 'GlynacAI123!',
+    password: process.env.SEED_GLYNAC_USER_PASSWORD ?? '',
     tenantSlug: 'glynac-ai',
     roleName: 'Glynac AI User',
     roleDescription: 'User role scoped to Glynac AI tenant content only',
@@ -121,13 +120,12 @@ const tenantScopedContentTypes = [
   'api::sylvan-request-access.sylvan-request-access',
 ];
 
-// Tenant admin accounts (Strapi Admin Panel)
 const tenantAdmins = [
   {
     firstname: 'RegulateThis',
     lastname: 'Admin',
     email: 'admin@regulatethis.com',
-    password: 'RegulateThisAdmin123',
+    password: process.env.SEED_REGULATETHIS_ADMIN_PASSWORD ?? '',
     username: 'regulatethisAdmin',
     tenantSlug: 'regulatethis',
     isActive: true,
@@ -136,7 +134,7 @@ const tenantAdmins = [
     firstname: 'Sylvan',
     lastname: 'Admin',
     email: 'admin@sylvannotes.com',
-    password: 'SylvanAdmin123',
+    password: process.env.SEED_SYLVAN_ADMIN_PASSWORD ?? '',
     username: 'sylvanAdmin',
     tenantSlug: 'sylvian',
     isActive: true,
@@ -145,7 +143,7 @@ const tenantAdmins = [
     firstname: 'Glynac',
     lastname: 'Admin',
     email: 'GlynacAdmin@glynac.ai',
-    password: 'GlynacAdmin123',
+    password: process.env.SEED_GLYNAC_ADMIN_PASSWORD ?? '',
     username: 'glynacAdmin',
     tenantSlug: 'glynac-ai',
     isActive: true,
@@ -173,6 +171,23 @@ export default {
    * run jobs, or perform some special logic.
    */
   async bootstrap({ strapi }: { strapi: Core.Strapi }) {
+    // Guard: abort if seed passwords are not configured
+    const requiredSeedEnvVars = [
+      'SEED_REGULATETHIS_USER_PASSWORD',
+      'SEED_SYLVAN_USER_PASSWORD',
+      'SEED_GLYNAC_USER_PASSWORD',
+      'SEED_REGULATETHIS_ADMIN_PASSWORD',
+      'SEED_SYLVAN_ADMIN_PASSWORD',
+      'SEED_GLYNAC_ADMIN_PASSWORD',
+    ];
+    const missingSeedVars = requiredSeedEnvVars.filter((v) => !process.env[v]);
+    if (missingSeedVars.length > 0) {
+      strapi.log.error(`[Bootstrap] Missing required env vars: ${missingSeedVars.join(', ')}`);
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error(`Missing required seed env vars: ${missingSeedVars.join(', ')}`);
+      }
+    }
+
     // ─── 1. Seed Tenants ───────────────────────────────────────────────
     // FIX A: seedTenant always returns an object with integer `id` AND `documentId`.
     // strapi.documents() (Document Service) omits the integer `id` column.

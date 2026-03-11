@@ -26,18 +26,31 @@ export const NewsletterForm: React.FC<NewsletterFormProps> = ({
 
         setStatus('loading');
 
-        // Simulate API call (replace with actual API integration later)
-        setTimeout(() => {
-            setStatus('success');
-            setMessage('Thank you for subscribing!');
-            setEmail('');
+        try {
+            const res = await fetch('/api/subscribe', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email }),
+            });
 
-            // Reset after 3 seconds
-            setTimeout(() => {
-                setStatus('idle');
-                setMessage('');
-            }, 3000);
-        }, 1000);
+            if (res.ok) {
+                setStatus('success');
+                setMessage('Thank you for subscribing!');
+                setEmail('');
+                setTimeout(() => { setStatus('idle'); setMessage(''); }, 4000);
+            } else {
+                const data = await res.json().catch(() => ({}));
+                setStatus('error');
+                setMessage(
+                    res.status === 409
+                        ? 'This email is already subscribed.'
+                        : (data?.error ?? 'Something went wrong. Please try again.')
+                );
+            }
+        } catch {
+            setStatus('error');
+            setMessage('Network error. Please try again.');
+        }
     };
 
     if (variant === 'centered') {
