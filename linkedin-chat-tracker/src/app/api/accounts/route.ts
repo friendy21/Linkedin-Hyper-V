@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { unipile } from '@/lib/unipile';
+import { workerClient } from '@/lib/worker-client';
 import { auth } from '@/lib/auth';
 
 export async function GET(req: NextRequest) {
@@ -19,13 +19,13 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json(accounts);
   } catch (error: unknown) {
-    const isDev = process.env.NODE_ENV === 'development'
-    const message = error instanceof Error ? error.message : 'Internal server error'
-    console.error('[Accounts GET] Error:', message)
+    const isDev = process.env.NODE_ENV === 'development';
+    const message = error instanceof Error ? error.message : 'Internal server error';
+    console.error('[Accounts GET] Error:', message);
     return NextResponse.json(
       { error: isDev ? message : 'Internal server error', code: 'INTERNAL_ERROR' },
-      { status: error instanceof Error && 'status' in error ? (error as any).status || 500 : 500 }
-    )
+      { status: 500 }
+    );
   }
 }
 
@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { name } = body;
+    const { name } = body as { name?: string };
 
     if (!name) {
       return NextResponse.json({ error: 'Name is required', code: 'BAD_REQUEST' }, { status: 400 });
@@ -45,21 +45,20 @@ export async function POST(req: NextRequest) {
 
     const baseUrl = process.env.NEXTAUTH_URL || req.nextUrl.origin;
 
-    const { url: authUrl } = await unipile.generateAuthLink({
-      providers: ['LINKEDIN'],
+    const { url: authUrl } = await workerClient.generateAuthLink({
       name,
-      success_redirect_url: `${baseUrl}/accounts?connected=1`,
-      failure_redirect_url: `${baseUrl}/accounts?error=1`
+      successRedirectUrl: `${baseUrl}/accounts?connected=1`,
+      failureRedirectUrl: `${baseUrl}/accounts?error=1`,
     });
 
     return NextResponse.json({ authUrl });
   } catch (error: unknown) {
-    const isDev = process.env.NODE_ENV === 'development'
-    const message = error instanceof Error ? error.message : 'Internal server error'
-    console.error('[Accounts POST] Error:', message)
+    const isDev = process.env.NODE_ENV === 'development';
+    const message = error instanceof Error ? error.message : 'Internal server error';
+    console.error('[Accounts POST] Error:', message);
     return NextResponse.json(
       { error: isDev ? message : 'Internal server error', code: 'INTERNAL_ERROR' },
-      { status: error instanceof Error && 'status' in error ? (error as any).status || 500 : 500 }
-    )
+      { status: 500 }
+    );
   }
 }

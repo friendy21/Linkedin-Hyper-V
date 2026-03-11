@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { unipile } from '@/lib/unipile';
+import { workerClient } from '@/lib/worker-client';
 import { auth } from '@/lib/auth';
 
 export async function GET(req: NextRequest) {
@@ -10,11 +10,11 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized', code: 'UNAUTHORIZED' }, { status: 401 });
     }
 
-    const searchParams = req.nextUrl.searchParams;
+    const { searchParams } = req.nextUrl;
     const accountId = searchParams.get('accountId');
-    const cursor = searchParams.get('cursor') || undefined;
-    const search = searchParams.get('search');
-    const filter = searchParams.get('filter');
+    const cursor    = searchParams.get('cursor') ?? undefined;
+    const search    = searchParams.get('search');
+    const filter    = searchParams.get('filter');
 
     if (!accountId) {
       return NextResponse.json({ error: 'accountId is required', code: 'BAD_REQUEST' }, { status: 400 });
@@ -28,84 +28,80 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Account not found', code: 'NOT_FOUND' }, { status: 404 });
     }
 
-    const paginatedChats = await unipile.listChats(account.unipileAccountId, cursor);
+    const paginatedChats = await workerClient.listChats(account.unipileAccountId, cursor);
 
-    // Upsert Contacts & Conversations
+    // Upsert contacts & conversations into the local DB cache
     for (const chat of paginatedChats.items) {
       const upsertedContactIds = new Map<string, string>();
 
       for (const participant of chat.participants) {
-        // After each contact upsert, get the resulting contact record:
-        const upsertedContact = await prisma.contact.upsert({
+        const upserted = await prisma.contact.upsert({
           where: { unipileId_accountId: { unipileId: participant.id, accountId: account.id } },
-          update: { 
-            name: participant.name, 
-            headline: participant.headline, 
-            avatarUrl: participant.avatar_url, 
-            profileUrl: participant.profile_url 
+          update: {
+            name:       participant.name,
+            headline:   participant.headline,
+            avatarUrl:  participant.avatarUrl,
+            profileUrl: participant.profileUrl,
           },
           create: {
-            unipileId: participant.id,
-            accountId: account.id,
-            name: participant.name,
-            headline: participant.headline,
-            avatarUrl: participant.avatar_url,
-            profileUrl: participant.profile_url,
+            unipileId:  participant.id,
+            accountId:  account.id,
+            name:       participant.name,
+            headline:   participant.headline,
+            avatarUrl:  participant.avatarUrl,
+            profileUrl: participant.profileUrl,
           }
         });
-        upsertedContactIds.set(participant.id, upsertedContact.id);
+        upsertedContactIds.set(participant.id, upserted.id);
       }
 
-      // Then in the conversation upsert, link the primary participant:
-      const primaryParticipant = chat.participants.find(p => p.id !== account.unipileAccountId) 
-                                ?? chat.participants[0];
-      
-      // Use the previously upserted contact for this participant
+      const primary = chat.participants.find(p => p.id !== account.unipileAccountId)
+                   ?? chat.participants[0];
+
       await prisma.conversation.upsert({
         where: { unipileChatId: chat.id },
         update: {
-          unreadCount: chat.unread_count,
-          lastMessageAt: chat.last_message?.created_at ? new Date(chat.last_message.created_at) : undefined,
-          lastMessageText: chat.last_message?.text ?? null,
+          unreadCount:     chat.unreadCount,
+          lastMessageAt:   chat.lastMessage?.createdAt ? new Date(chat.lastMessage.createdAt) : undefined,
+          lastMessageText: chat.lastMessage?.text ?? null,
         },
         create: {
-          unipileChatId: chat.id,
-          accountId: account.id,
-          contactId: primaryParticipant ? upsertedContactIds.get(primaryParticipant.id) ?? null : null,
-          unreadCount: chat.unread_count,
-          lastMessageAt: chat.last_message?.created_at ? new Date(chat.last_message.created_at) : new Date(),
-          lastMessageText: chat.last_message?.text ?? null,
+          unipileChatId:   chat.id,
+          accountId:       account.id,
+          contactId:       primary ? (upsertedContactIds.get(primary.id) ?? null) : null,
+          unreadCount:     chat.unreadCount,
+          lastMessageAt:   chat.lastMessage?.createdAt ? new Date(chat.lastMessage.createdAt) : new Date(),
+          lastMessageText: chat.lastMessage?.text ?? null,
         }
       });
     }
 
-    // Process search & filter constraints on fetched dataset
     let displayChats = paginatedChats.items;
 
     if (filter === 'unread') {
-      displayChats = displayChats.filter(c => c.unread_count > 0);
+      displayChats = displayChats.filter(c => c.unreadCount > 0);
     }
-    
+
     if (search) {
       const s = search.toLowerCase();
-      displayChats = displayChats.filter(c => 
-        (c.last_message?.text ?? '').toLowerCase().includes(s) || 
+      displayChats = displayChats.filter(c =>
+        (c.lastMessage?.text ?? '').toLowerCase().includes(s) ||
         c.participants.some(p => p.name.toLowerCase().includes(s))
       );
     }
 
     return NextResponse.json({
       conversations: displayChats,
-      nextCursor: paginatedChats.cursor,
-      hasMore: paginatedChats.has_more
+      nextCursor:    paginatedChats.cursor,
+      hasMore:       paginatedChats.hasMore,
     });
   } catch (error: unknown) {
-    const isDev = process.env.NODE_ENV === 'development'
-    const message = error instanceof Error ? error.message : 'Internal server error'
-    console.error('[Conversations GET] Error:', message)
+    const isDev = process.env.NODE_ENV === 'development';
+    const message = error instanceof Error ? error.message : 'Internal server error';
+    console.error('[Conversations GET] Error:', message);
     return NextResponse.json(
       { error: isDev ? message : 'Internal server error', code: 'INTERNAL_ERROR' },
-      { status: error instanceof Error && 'status' in error ? (error as any).status || 500 : 500 }
-    )
+      { status: 500 }
+    );
   }
 }

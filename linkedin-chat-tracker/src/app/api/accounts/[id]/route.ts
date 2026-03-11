@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { unipile } from '@/lib/unipile';
+import { workerClient } from '@/lib/worker-client';
 import { auth } from '@/lib/auth';
 
 export async function GET(
@@ -14,15 +14,8 @@ export async function GET(
     }
 
     const account = await prisma.linkedInAccount.findFirst({
-      where: { 
-        id: params.id,
-        userId: session.user.id 
-      },
-      include: {
-        _count: {
-          select: { conversations: true }
-        }
-      }
+      where: { id: params.id, userId: session.user.id },
+      include: { _count: { select: { conversations: true } } }
     });
 
     if (!account) {
@@ -31,13 +24,13 @@ export async function GET(
 
     return NextResponse.json(account);
   } catch (error: unknown) {
-    const isDev = process.env.NODE_ENV === 'development'
-    const message = error instanceof Error ? error.message : 'Internal server error'
-    console.error('[Account GET] Error:', message)
+    const isDev = process.env.NODE_ENV === 'development';
+    const message = error instanceof Error ? error.message : 'Internal server error';
+    console.error('[Account GET] Error:', message);
     return NextResponse.json(
       { error: isDev ? message : 'Internal server error', code: 'INTERNAL_ERROR' },
-      { status: error instanceof Error && 'status' in error ? (error as any).status || 500 : 500 }
-    )
+      { status: 500 }
+    );
   }
 }
 
@@ -52,30 +45,26 @@ export async function DELETE(
     }
 
     const account = await prisma.linkedInAccount.findFirst({
-      where: { 
-        id: params.id,
-        userId: session.user.id 
-      }
+      where: { id: params.id, userId: session.user.id }
     });
 
     if (!account) {
       return NextResponse.json({ error: 'Account not found', code: 'NOT_FOUND' }, { status: 404 });
     }
 
-    await unipile.deleteAccount(account.unipileAccountId);
+    // Tell worker to drop the session cookies for this account
+    await workerClient.deleteAccount(account.unipileAccountId);
 
-    await prisma.linkedInAccount.delete({
-      where: { id: account.id }
-    });
+    await prisma.linkedInAccount.delete({ where: { id: account.id } });
 
     return new NextResponse(null, { status: 204 });
   } catch (error: unknown) {
-    const isDev = process.env.NODE_ENV === 'development'
-    const message = error instanceof Error ? error.message : 'Internal server error'
-    console.error('[Account DELETE] Error:', message)
+    const isDev = process.env.NODE_ENV === 'development';
+    const message = error instanceof Error ? error.message : 'Internal server error';
+    console.error('[Account DELETE] Error:', message);
     return NextResponse.json(
       { error: isDev ? message : 'Internal server error', code: 'INTERNAL_ERROR' },
-      { status: error instanceof Error && 'status' in error ? (error as any).status || 500 : 500 }
-    )
+      { status: 500 }
+    );
   }
 }

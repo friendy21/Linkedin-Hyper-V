@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
-import { getUnipileClient } from '@/lib/unipile'
+import { workerClient } from '@/lib/worker-client'
 import { createJob, getJob } from '@/lib/jobStore'
 import { z } from 'zod'
 
@@ -68,7 +68,6 @@ async function processBulkJob(
   user: { name?: string | null }
 ) {
   const job = getJob(jobId)!
-  const unipileClient = getUnipileClient()
 
   for (const recipient of data.recipients) {
     try {
@@ -109,25 +108,12 @@ Max 500 characters. Write ONLY the message text. No quotes, no preamble, sound h
           .replace(/{company}/g, recipient.company || '')
       }
 
-      // Send via Unipile API directly
-      const sendRes = await fetch(`${unipileClient.publicDsn}/api/v1/chats`, {
-        method: 'POST',
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-          'X-API-KEY': unipileClient.publicToken,
-        },
-        body: JSON.stringify({
-          account_id: account.unipileAccountId,
-          attendees_ids: [recipient.profileUrl],
-          text: finalMessage,
-        }),
-        signal: AbortSignal.timeout(15000),
-      })
-
-      if (!sendRes.ok) {
-        const errText = await sendRes.text()
-        throw new Error(`Unipile API ${sendRes.status}: ${errText.slice(0, 200)}`)
+      // Send via Worker Client
+      try {
+        await workerClient.sendMessageToProfile(account.unipileAccountId, recipient.profileUrl, finalMessage);
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        throw new Error(`Worker API: ${message}`);
       }
 
       // Log success
