@@ -6,7 +6,7 @@
 
 const { getAccountContext }            = require('../browser');
 const { loadCookies, saveCookies }     = require('../session');
-const { delay, humanClick }            = require('../humanBehavior');
+const { delay, humanClick, humanType } = require('../humanBehavior');
 const { checkAndIncrement }            = require('../rateLimit');
 const { getRedis }                     = require('../redisClient');
 
@@ -34,12 +34,8 @@ async function sendMessage({ accountId, chatId, text, proxyUrl }) {
 
     await delay(2000, 4000);
 
-    // Click the message compose box
-    await humanClick(page, '.msg-form__contenteditable, [data-view-name="messaging-compose-box"] [contenteditable]');
-    await delay(500, 1000);
-
     // Type the message
-    await page.keyboard.type(text, { delay: 60 + Math.random() * 80 });
+    await humanType(page, '.msg-form__contenteditable, [data-view-name="messaging-compose-box"] [contenteditable]', text);
     await delay(800, 1800);
 
     // Send
@@ -51,7 +47,7 @@ async function sendMessage({ accountId, chatId, text, proxyUrl }) {
     const msgId = `sent-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     
     // Try to extract the real participant name
-    let participantName = 'Participant';
+    let participantName = 'Unknown';
     try {
       const nameEl = await page.$('.msg-thread__name, .msg-entity-lockup__entity-title');
       if (nameEl) {

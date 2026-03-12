@@ -7,7 +7,7 @@
 
 const { getAccountContext }              = require('../browser');
 const { loadCookies, saveCookies }       = require('../session');
-const { delay, humanClick, humanScroll } = require('../humanBehavior');
+const { delay, humanClick, humanScroll, humanType } = require('../humanBehavior');
 const { checkAndIncrement }              = require('../rateLimit');
 const { getRedis }                       = require('../redisClient');
 
@@ -35,14 +35,31 @@ async function sendMessageNew({ accountId, profileUrl, text, proxyUrl }) {
     await humanScroll(page, 200);
     await delay(800, 1500);
 
+    // Try to extract profile name near the interaction point
+    let participantName = 'Unknown';
+    try {
+      participantName = await page.evaluate(() => {
+        const messageButton = document.querySelector('button[aria-label*="Message"], a[aria-label*="Message"]');
+        const nearestCard = messageButton?.closest(
+          '.pv-top-card, .ph5, .artdeco-card, main, section'
+        );
+
+        const scopedName = nearestCard?.querySelector('h1, [data-anonymize="person-name"], .text-heading-xlarge');
+        const fallbackName = document.querySelector('h1, [data-anonymize="person-name"], .text-heading-xlarge');
+        const raw = scopedName?.textContent || fallbackName?.textContent || '';
+        const value = raw.trim();
+
+        return value || 'Unknown';
+      });
+    } catch (_) {}
+
     // Click the Message button on their profile
     await humanClick(page, 'button[aria-label*="Message"], a[aria-label*="Message"]', { timeout: 10000 });
     await delay(1500, 3000);
 
     // Type the message in the compose modal
     const composeSelector = '.msg-form__contenteditable, [contenteditable][role="textbox"]';
-    await page.waitForSelector(composeSelector, { timeout: 10000 });
-    await page.keyboard.type(text, { delay: 65 + Math.random() * 85 });
+    await humanType(page, composeSelector, text, { timeout: 10000 });
     await delay(800, 1800);
 
     // Send
@@ -63,7 +80,7 @@ async function sendMessageNew({ accountId, profileUrl, text, proxyUrl }) {
     const entry = JSON.stringify({
       type: 'messageSent',
       accountId,
-      targetName: 'Participant', // Simple fallback since we don't scrape name easily here
+      targetName: participantName,
       targetProfileUrl: profileUrl,
       message: text,
       timestamp: Date.now(),
