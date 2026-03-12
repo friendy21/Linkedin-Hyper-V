@@ -1,5 +1,7 @@
 'use strict';
 
+const { sanitizeText } = require('./sanitizers');
+
 /** Random integer between min and max inclusive */
 function randInt(min, max) {
   return min + Math.floor(Math.random() * (max - min + 1));
@@ -40,11 +42,7 @@ async function humanType(page, selector, text, options = {}) {
   await humanClick(page, selector, options);
   await delay(150, 350);
 
-  // Sanitize: max 3000 chars, strip non-printable/control characters (except newlines)
-  const saneText = (text || '')
-    .toString()
-    .replace(/[^\x20-\x7E\n\r]/g, '')
-    .slice(0, 3000);
+  const saneText = sanitizeText(text, { maxLength: 3000 });
 
   for (const char of saneText) {
     await page.keyboard.type(char, { delay: randInt(55, 130) });

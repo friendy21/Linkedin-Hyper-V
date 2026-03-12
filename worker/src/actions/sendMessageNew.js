@@ -7,7 +7,7 @@
 
 const { getAccountContext }              = require('../browser');
 const { loadCookies, saveCookies }       = require('../session');
-const { delay, humanClick, humanScroll } = require('../humanBehavior');
+const { delay, humanClick, humanScroll, humanType } = require('../humanBehavior');
 const { checkAndIncrement }              = require('../rateLimit');
 const { getRedis }                       = require('../redisClient');
 
@@ -41,8 +41,7 @@ async function sendMessageNew({ accountId, profileUrl, text, proxyUrl }) {
 
     // Type the message in the compose modal
     const composeSelector = '.msg-form__contenteditable, [contenteditable][role="textbox"]';
-    await page.waitForSelector(composeSelector, { timeout: 10000 });
-    await page.keyboard.type(text, { delay: 65 + Math.random() * 85 });
+    await humanType(page, composeSelector, text, { timeout: 10000 });
     await delay(800, 1800);
 
     // Send
