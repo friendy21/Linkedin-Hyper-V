@@ -15,6 +15,7 @@ export async function GET(
   if (authError) return authError;
 
   try {
+    // Next.js 15+: params is a Promise — must be awaited
     const { accountId: rawAccountId } = await params;
     const accountId = requireString(rawAccountId, 'accountId');
 

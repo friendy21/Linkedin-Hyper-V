@@ -1,120 +1,102 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const BACKEND = process.env.API_URL ?? 'http://localhost:3001';
-const BACKEND_SECRET = process.env.API_SECRET ?? '';
-const CALLER_TOKEN = process.env.API_ROUTE_AUTH_TOKEN;
+const API_URL    = process.env.API_URL    ?? 'http://localhost:3001';
+const API_SECRET = process.env.API_SECRET ?? '';
 
-function jsonError(status: number, error: string): NextResponse {
-  return NextResponse.json({ error }, { status });
-}
-
+/** Verify the internal X-Api-Key header matches our secret. */
 export function authenticateCaller(req: NextRequest): NextResponse | null {
-  const origin = req.headers.get('origin');
-  if (origin && origin !== req.nextUrl.origin) {
-    return jsonError(401, 'Unauthorized caller origin');
+  const key = req.headers.get('x-api-key');
+  if (!API_SECRET || key !== API_SECRET) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
-
-  const secFetchSite = req.headers.get('sec-fetch-site');
-  if (secFetchSite && !['same-origin', 'same-site', 'none'].includes(secFetchSite)) {
-    return jsonError(401, 'Unauthorized caller context');
-  }
-
-  if (CALLER_TOKEN) {
-    const authHeader = req.headers.get('authorization');
-    if (authHeader !== `Bearer ${CALLER_TOKEN}`) {
-      return jsonError(401, 'Missing or invalid API route token');
-    }
-  }
-
   return null;
 }
 
-function resolveBackendUrl(path: string, query?: URLSearchParams): URL {
-  const backend = new URL(BACKEND);
-  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
-  const url = new URL(normalizedPath, backend);
-
-  if (query) {
-    url.search = query.toString();
-  }
-
-  if (url.origin !== backend.origin) {
-    throw new Error('Backend origin mismatch');
-  }
-
-  return url;
-}
-
-export async function forwardToBackend({
-  method,
-  path,
-  query,
-  body,
-}: {
-  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+interface ForwardOptions {
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
   path: string;
   query?: URLSearchParams;
   body?: unknown;
-}): Promise<NextResponse> {
-  const url = resolveBackendUrl(path, query);
+}
+
+/**
+ * Forward a request to the worker Express API.
+ * Adds X-Api-Key header automatically.
+ * Includes a 30-second AbortSignal timeout.
+ */
+export async function forwardToBackend(opts: ForwardOptions): Promise<NextResponse> {
+  const { method, path, query, body } = opts;
+  const qs    = query ? `?${query.toString()}` : '';
+  const url   = `${API_URL}${path}${qs}`;
 
   try {
-    const response = await fetch(url, {
+    const res = await fetch(url, {
       method,
       headers: {
         'Content-Type': 'application/json',
-        'X-Api-Key': BACKEND_SECRET,
+        'X-Api-Key': API_SECRET,
       },
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: body != null ? JSON.stringify(body) : undefined,
+      signal: AbortSignal.timeout(30_000),
     });
 
-    const text = await response.text();
-
-    return new NextResponse(text, {
-      status: response.status,
-      headers: {
-        'Content-Type': response.headers.get('Content-Type') ?? 'application/json',
-      },
+    const data = await res.text();
+    return new NextResponse(data, {
+      status: res.status,
+      headers: { 'Content-Type': 'application/json' },
     });
-  } catch {
-    return jsonError(502, 'Backend unreachable');
+  } catch (err) {
+    const isTimeout = err instanceof DOMException && err.name === 'TimeoutError';
+    return NextResponse.json(
+      { error: isTimeout ? 'Backend request timed out' : 'Backend unreachable' },
+      { status: 502 }
+    );
   }
 }
 
+/** Validate and return a required string param; throws on failure. */
 export function requireString(value: string | null, name: string): string {
-  if (!value || !value.trim()) {
-    throw new Error(`Invalid ${name}`);
+  if (!value || value.trim() === '') {
+    throw new Error(`Missing required field: ${name}`);
   }
-
-  return value;
+  return value.trim();
 }
 
+interface IntegerOptions {
+  min?: number;
+  max?: number;
+  fallback?: number;
+}
+
+/** Parse an optional integer param with min/max bounds and an optional fallback. */
 export function requireInteger(
   value: string | null,
   name: string,
-  { min, max, fallback }: { min?: number; max?: number; fallback?: number } = {}
+  opts: IntegerOptions = {}
 ): number {
-  if ((value === null || value === '') && fallback !== undefined) {
-    return fallback;
+  const { min, max, fallback } = opts;
+
+  if (value === null || value === '') {
+    if (fallback !== undefined) return fallback;
+    throw new Error(`Missing required integer: ${name}`);
   }
 
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed)) {
-    throw new Error(`Invalid ${name}`);
+  const parsed = parseInt(value, 10);
+  if (isNaN(parsed)) {
+    throw new Error(`Invalid integer for ${name}: "${value}"`);
   }
-
   if (min !== undefined && parsed < min) {
-    throw new Error(`Invalid ${name}`);
+    throw new Error(`${name} must be >= ${min}`);
   }
-
   if (max !== undefined && parsed > max) {
-    throw new Error(`Invalid ${name}`);
+    throw new Error(`${name} must be <= ${max}`);
   }
-
   return parsed;
 }
 
+/** Return a 400 JSON response from a caught Error or unknown. */
 export function badRequest(error: unknown): NextResponse {
-  const message = error instanceof Error ? error.message : 'Invalid request';
-  return jsonError(400, message);
+  const message =
+    error instanceof Error ? error.message : 'Bad request';
+  return NextResponse.json({ error: message }, { status: 400 });
 }

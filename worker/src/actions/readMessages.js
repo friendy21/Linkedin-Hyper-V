@@ -1,17 +1,12 @@
 'use strict';
 
-/**
- * Scrapes the LinkedIn messaging inbox and returns a list of chats.
- * Uses the messaging overlay accessible from /messaging/.
- */
-
-const { getAccountContext } = require('../browser');
-const { loadCookies, saveCookies }     = require('../session');
-const { delay, humanScroll }           = require('../humanBehavior');
-const { checkAndIncrement }            = require('../rateLimit');
+const { getAccountContext }        = require('../browser');
+const { loadCookies, saveCookies } = require('../session');
+const { delay, humanScroll }       = require('../humanBehavior');
+const { checkAndIncrement }        = require('../rateLimit');
 
 async function readMessages({ accountId, proxyUrl, limit = 20 }) {
-  await checkAndIncrement(accountId, 'inboxReads');
+  await checkAndIncrement(accountId, 'inboxReads'); // FIRST — before any browser work
 
   const { context } = await getAccountContext(accountId, proxyUrl);
   let page;
@@ -34,14 +29,12 @@ async function readMessages({ accountId, proxyUrl, limit = 20 }) {
 
     await delay(2000, 4000);
 
-    // Wait for conversation list
     await page.waitForSelector('[data-view-name="messaging-threads"]', { timeout: 15000 })
       .catch(() => null);
 
     await humanScroll(page, 300);
     await delay(1000, 2000);
 
-    // Scrape conversation list items
     const chats = await page.evaluate((maxItems) => {
       const items   = [];
       const threads = document.querySelectorAll(
@@ -57,14 +50,13 @@ async function readMessages({ accountId, proxyUrl, limit = 20 }) {
           const linkEl    = thread.closest('a') || thread.querySelector('a');
           const avatarEl  = thread.querySelector('img');
 
-          // Extract conversation ID from URL
           const href    = linkEl?.href || '';
           const idMatch = href.match(/\/messaging\/thread\/([^/]+)/);
           const chatId  = idMatch ? idMatch[1] : `unknown-${Date.now()}`;
 
           items.push({
             id:           chatId,
-            accountId:    '',   // filled in by caller
+            accountId:    '', // filled in by caller — not accessible inside browser context
             participants: [{
               id:         chatId,
               name:       nameEl?.textContent?.trim()   || 'Unknown',
@@ -87,10 +79,9 @@ async function readMessages({ accountId, proxyUrl, limit = 20 }) {
       return items;
     }, limit);
 
-    // Inject accountId
+    // Inject accountId server-side — not available inside browser context
     chats.forEach((c) => { c.accountId = accountId; });
 
-    // Refresh cookies
     await saveCookies(accountId, await context.cookies());
 
     return { items: chats, cursor: null, hasMore: false };

@@ -7,7 +7,10 @@ interface TimeAgoProps {
 
 export function TimeAgo({ timestamp, className = '' }: TimeAgoProps) {
   return (
-    <span className={`text-xs tabular-nums ${className}`} style={{ color: 'var(--text-muted)' }}>
+    <span
+      className={`text-xs tabular-nums ${className}`}
+      style={{ color: 'var(--text-muted)' }}
+    >
       {timeAgo(timestamp)}
     </span>
   );

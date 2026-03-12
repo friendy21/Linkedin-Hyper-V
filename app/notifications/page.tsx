@@ -8,17 +8,18 @@ import { Spinner } from '@/components/ui/Spinner';
 import { ErrorState } from '@/components/ui/ErrorState';
 
 export default function NotificationsPage() {
-  const [entries, setEntries]   = useState<ActivityEntry[]>([]);
+  const [entries,  setEntries]  = useState<ActivityEntry[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
-  const [tab, setTab]           = useState<ActivityTab>('all');
-  const [loading, setLoading]   = useState(true);
-  const [error, setError]       = useState<string | null>(null);
+  const [tab,      setTab]      = useState<ActivityTab>('all');
+  const [loading,  setLoading]  = useState(true);
+  const [error,    setError]    = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
       const { accounts: accs } = await getAccounts();
       setAccounts(accs);
 
+      // Promise.all (NOT allSettled) — if any account fails, bubble the error
       const logs = await Promise.all(
         accs.map((a) => getAccountActivity(a.id, 0, 100).then((r) => r.entries))
       );
@@ -42,6 +43,7 @@ export default function NotificationsPage() {
     return () => clearInterval(interval);
   }, [load]);
 
+  // Filter in the page — pass pre-filtered to NotificationFeed
   const filtered = tab === 'all' ? entries : entries.filter((e) => e.type === tab);
 
   if (loading) {

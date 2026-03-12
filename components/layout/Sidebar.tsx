@@ -14,37 +14,41 @@ interface NavCounts {
 
 export function Sidebar() {
   const pathname = usePathname();
-  const [counts, setCounts] = useState<NavCounts>({ inbox: 0, connections: 0, notifications: 0 });
+  const [counts, setCounts] = useState<NavCounts>({
+    inbox: 0,
+    connections: 0,
+    notifications: 0,
+  });
 
   async function fetchCounts() {
     try {
       const { accounts } = await getAccounts();
 
-      // Inbox unread count — from unified inbox if available
+      // Inbox unread — from unified inbox; ignore failures (slow scrape)
       let inboxUnread = 0;
       try {
         const { conversations } = await getUnifiedInbox();
         inboxUnread = conversations.reduce((sum, c) => sum + (c.unreadCount ?? 0), 0);
       } catch {
-        // ignore — inbox scrape can be slow
+        // intentionally swallowed
       }
 
-      // Connections + notifications from activity logs
-      let connections = 0;
+      // Connections + notifications from all account activity logs
+      let connections  = 0;
       let notifications = 0;
       const activityResults = await Promise.allSettled(
         accounts.map((a) => getAccountActivity(a.id, 0, 200))
       );
       for (const r of activityResults) {
         if (r.status === 'fulfilled') {
-          connections  += r.value.entries.filter((e) => e.type === 'connectionSent').length;
+          connections   += r.value.entries.filter((e) => e.type === 'connectionSent').length;
           notifications += r.value.entries.length;
         }
       }
 
       setCounts({ inbox: inboxUnread, connections, notifications });
     } catch {
-      // silently fail — badge just stays at 0
+      // silently fail — badges stay at 0
     }
   }
 
@@ -57,24 +61,24 @@ export function Sidebar() {
 
   const navItems = [
     {
-      href: '/inbox',
-      icon: Mail,
-      label: 'Inbox',
-      count: counts.inbox,
+      href:       '/inbox',
+      icon:       Mail,
+      label:      'Inbox',
+      count:      counts.inbox,
       countColor: 'bg-red-600',
     },
     {
-      href: '/connections',
-      icon: Users,
-      label: 'Network',
-      count: counts.connections,
+      href:       '/connections',
+      icon:       Users,
+      label:      'Network',
+      count:      counts.connections,
       countColor: 'bg-purple-600',
     },
     {
-      href: '/notifications',
-      icon: Bell,
-      label: 'Activity',
-      count: counts.notifications,
+      href:       '/notifications',
+      icon:       Bell,
+      label:      'Activity',
+      count:      counts.notifications,
       countColor: 'bg-red-600',
     },
   ];
@@ -89,7 +93,7 @@ export function Sidebar() {
         minHeight: '100vh',
       }}
     >
-      {/* LinkedIn Logo */}
+      {/* LinkedIn brand logo — LinkedIn blue, NOT the purple avatar gradient */}
       <div className="mb-4 flex-shrink-0">
         <div
           className="w-9 h-9 rounded-md flex items-center justify-center font-bold text-white text-lg select-none"
@@ -99,7 +103,7 @@ export function Sidebar() {
         </div>
       </div>
 
-      {/* Nav Items */}
+      {/* Nav links */}
       <div className="flex flex-col gap-1 flex-1">
         {navItems.map(({ href, icon: Icon, label, count, countColor }) => {
           const isActive = pathname.startsWith(href);
@@ -110,9 +114,9 @@ export function Sidebar() {
               title={label}
               className="relative flex items-center justify-center w-10 h-10 rounded-lg transition-colors"
               style={{
-                color: isActive ? 'var(--accent)' : 'var(--text-muted)',
-                background: isActive ? 'rgba(108,99,255,0.12)' : 'transparent',
-                borderLeft: isActive ? '2px solid var(--accent)' : '2px solid transparent',
+                color:       isActive ? 'var(--accent)'          : 'var(--text-muted)',
+                background:  isActive ? 'rgba(108,99,255,0.12)'  : 'transparent',
+                borderLeft:  isActive ? '2px solid var(--accent)' : '2px solid transparent',
               }}
             >
               <Icon size={20} />
@@ -128,7 +132,7 @@ export function Sidebar() {
         })}
       </div>
 
-      {/* Live polling indicator */}
+      {/* Bottom: purple "LI" avatar with green online dot */}
       <div className="mt-auto mb-2 flex flex-col items-center gap-1">
         <div className="relative">
           <div

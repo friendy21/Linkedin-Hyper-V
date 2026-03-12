@@ -1,18 +1,13 @@
 'use strict';
 
-/**
- * Sends a LinkedIn connection request to a profile.
- * Optionally includes a personalised note (max 300 chars).
- */
-
-const { getAccountContext }                         = require('../browser');
-const { loadCookies, saveCookies }                  = require('../session');
+const { getAccountContext } = require('../browser');
+const { loadCookies, saveCookies } = require('../session');
 const { delay, humanClick, humanType, humanScroll } = require('../humanBehavior');
-const { checkAndIncrement }                         = require('../rateLimit');
-const { getRedis }                                  = require('../redisClient');
+const { checkAndIncrement } = require('../rateLimit');
+const { getRedis } = require('../redisClient');
 
 async function sendConnectionRequest({ accountId, profileUrl, note, proxyUrl }) {
-  await checkAndIncrement(accountId, 'connectRequests');
+  await checkAndIncrement(accountId, 'connectRequests'); // FIRST
 
   const { context } = await getAccountContext(accountId, proxyUrl);
   let page;
@@ -34,29 +29,22 @@ async function sendConnectionRequest({ accountId, profileUrl, note, proxyUrl }) 
     await humanScroll(page, 150);
     await delay(800, 1500);
 
-    // Try to extract profile name near the interaction point
+    // Extract name from scope hierarchy near the Connect button
     let participantName = 'Unknown';
     try {
       participantName = await page.evaluate(() => {
         const connectButton = document.querySelector('button[aria-label*="Connect"], button[aria-label*="connect"]');
-        const nearestCard = connectButton?.closest(
-          '.pv-top-card, .ph5, .artdeco-card, main, section'
-        );
-
+        const nearestCard = connectButton?.closest('.pv-top-card, .ph5, .artdeco-card, main, section');
         const scopedName = nearestCard?.querySelector('h1, [data-anonymize="person-name"], .text-heading-xlarge');
         const fallbackName = document.querySelector('h1, [data-anonymize="person-name"], .text-heading-xlarge');
         const raw = scopedName?.textContent || fallbackName?.textContent || '';
-        const value = raw.trim();
-
-        return value || 'Unknown';
+        return raw.trim() || 'Unknown';
       });
-    } catch (_) {}
+    } catch (_) { }
 
-    // Click Connect button — may be inside a More dropdown
+    // Try direct Connect button first — if not present, use More Actions dropdown
     const connectBtn = await page.$('button[aria-label*="Connect"], button[aria-label*="connect"]');
-
     if (!connectBtn) {
-      // Try via the More... actions dropdown
       await humanClick(page, 'button[aria-label*="More actions"]', { timeout: 8000 });
       await delay(500, 1000);
       await humanClick(page, '[aria-label*="Connect"]', { timeout: 5000 });
@@ -67,23 +55,22 @@ async function sendConnectionRequest({ accountId, profileUrl, note, proxyUrl }) 
     await delay(1000, 2000);
 
     if (note && note.trim().length > 0) {
-      // Click "Add a note" in the connection modal
       const addNoteBtn = await page.$('button[aria-label*="Add a note"]');
       if (addNoteBtn) {
         await humanClick(page, 'button[aria-label*="Add a note"]');
         await delay(500, 1000);
+        // Two selectors for the note textarea
         await humanType(page, '#custom-message, textarea[name="message"]', note.slice(0, 300));
         await delay(600, 1200);
       }
     }
 
-    // Click Send / Done
     await humanClick(page, 'button[aria-label*="Send invitation"], button[aria-label*="Send now"]');
     await delay(1500, 3000);
 
     await saveCookies(accountId, await context.cookies());
 
-    // Log activity
+    // Activity log — this is what populates the Connections page
     const redis = getRedis();
     const entry = JSON.stringify({
       type: 'connectionSent',
@@ -99,7 +86,7 @@ async function sendConnectionRequest({ accountId, profileUrl, note, proxyUrl }) 
 
     return { success: true, profileUrl };
   } finally {
-    if (page) await page.close().catch(() => {});
+    if (page) await page.close().catch(() => { });
   }
 }
 

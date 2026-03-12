@@ -1,16 +1,8 @@
 'use strict';
 
-/**
- * Verifies a session is alive by navigating to LinkedIn feed.
- * Does NOT perform credential login (too CAPTCHA-prone to automate).
- * Cookies must be imported manually via POST /accounts/:id/session.
- *
- * Returns { ok: true } if session is valid, throws WorkerError if not.
- */
-
-const { getAccountContext } = require('../browser');
-const { loadCookies, saveCookies }     = require('../session');
-const { delay }                        = require('../humanBehavior');
+const { getAccountContext }        = require('../browser');
+const { loadCookies, saveCookies } = require('../session');
+const { delay }                    = require('../humanBehavior');
 
 async function verifySession({ accountId, proxyUrl }) {
   const { context } = await getAccountContext(accountId, proxyUrl);
@@ -35,7 +27,6 @@ async function verifySession({ accountId, proxyUrl }) {
 
     await delay(1500, 3000);
 
-    // If redirected to login page, session is expired
     const url = page.url();
     if (url.includes('/login') || url.includes('/checkpoint') || url.includes('/authwall')) {
       const err = new Error(`Session expired for account ${accountId}. Re-import cookies.`);
@@ -44,9 +35,8 @@ async function verifySession({ accountId, proxyUrl }) {
       throw err;
     }
 
-    // Refresh cookies (LinkedIn rotates them)
-    const refreshed = await context.cookies();
-    await saveCookies(accountId, refreshed);
+    // LinkedIn rotates cookies — always save refreshed ones
+    await saveCookies(accountId, await context.cookies());
 
     return { ok: true, url };
   } finally {

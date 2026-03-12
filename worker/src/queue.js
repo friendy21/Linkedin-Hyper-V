@@ -1,9 +1,9 @@
 'use strict';
 
 const { Queue, QueueEvents } = require('bullmq');
-const { getRedis, createRedisClient } = require('./redisClient');
+const { createRedisClient }  = require('./redisClient');
 
-let _queue = null;
+let _queue       = null;
 let _queueEvents = null;
 
 function getQueue() {

@@ -1,7 +1,3 @@
-/**
- * Convert a unix millisecond timestamp (or ISO string) to a human-readable
- * relative time string: "2d ago", "3h ago", "5m ago", "just now"
- */
 export function timeAgo(input: number | string): string {
   const ms   = typeof input === 'number' ? input : new Date(input).getTime();
   const diff = Date.now() - ms;
@@ -14,10 +10,6 @@ export function timeAgo(input: number | string): string {
   return `${Math.floor(diff / 2_592_000_000)}mo ago`;
 }
 
-/**
- * Compute initials from a full name: first letter of first + last word.
- * "Dayanullah Khan" → "DK", "friendy tan" → "FT"
- */
 export function getInitials(name: string): string {
   const parts = name.trim().split(/\s+/);
   if (parts.length === 0) return '??';
@@ -25,19 +17,12 @@ export function getInitials(name: string): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-/**
- * Format a count for badges: 99 → "99", 100 → "99+", 0 → ""
- */
 export function formatCount(n: number): string {
   if (n <= 0)  return '';
   if (n > 99)  return '99+';
   return String(n);
 }
 
-/**
- * Group messages by date for the message thread.
- * Accepts both ISO strings and unix ms numbers.
- */
 export function groupByDate<T extends { sentAt: number | string }>(
   messages: T[]
 ): { label: string; messages: T[] }[] {
@@ -46,9 +31,7 @@ export function groupByDate<T extends { sentAt: number | string }>(
   for (const msg of messages) {
     const d     = new Date(msg.sentAt);
     const label = d.toLocaleDateString('en-US', {
-      weekday: 'long',
-      month: 'short',
-      day: 'numeric',
+      weekday: 'long', month: 'short', day: 'numeric',
     });
     const existing = groups.get(label) ?? [];
     existing.push(msg);
@@ -58,9 +41,6 @@ export function groupByDate<T extends { sentAt: number | string }>(
   return Array.from(groups.entries()).map(([label, messages]) => ({ label, messages }));
 }
 
-/**
- * Group an array by a string key.
- */
 export function groupBy<T>(arr: T[], key: (item: T) => string): Record<string, T[]> {
   return arr.reduce((acc, item) => {
     const k = key(item);

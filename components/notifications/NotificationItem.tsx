@@ -8,13 +8,18 @@ import { MessageSquare, UserPlus, Eye } from 'lucide-react';
 
 const TYPE_META: Record<
   ActivityEntry['type'],
-  { icon: React.ComponentType<{ size: number; color: string }>; label: string; color: string }
+  {
+    icon: React.ComponentType<{ size: number; color: string }>;
+    label: string;
+    color: string;
+  }
 > = {
   messageSent:    { icon: MessageSquare, label: 'Message sent',    color: '#8b7cf8' },
   connectionSent: { icon: UserPlus,      label: 'Connection sent', color: '#22c55e' },
   profileViewed:  { icon: Eye,           label: 'Profile viewed',  color: '#f59e0b' },
 };
 
+// Named export — NOT default export. Import as: import { NotificationRow } from './NotificationItem'
 export function NotificationRow({ entry }: { entry: ActivityEntry }) {
   const meta = TYPE_META[entry.type];
   const Icon = meta.icon;
@@ -30,7 +35,7 @@ export function NotificationRow({ entry }: { entry: ActivityEntry }) {
         ((e.currentTarget as HTMLDivElement).style.background = 'transparent')
       }
     >
-      {/* Avatar with type icon overlay */}
+      {/* Avatar with type icon overlay at bottom-right */}
       <div className="relative flex-shrink-0">
         <Avatar name={entry.targetName} size="sm" />
         <span
@@ -51,7 +56,9 @@ export function NotificationRow({ entry }: { entry: ActivityEntry }) {
         </div>
         <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
           <span style={{ color: meta.color }}>{meta.label}</span>
-          {entry.message ? ` — ${entry.message.slice(0, 80)}${entry.message.length > 80 ? '…' : ''}` : ''}
+          {entry.message
+            ? ` — ${entry.message.slice(0, 80)}${entry.message.length > 80 ? '…' : ''}`
+            : ''}
         </p>
         {entry.targetProfileUrl && (
           <a
@@ -61,13 +68,18 @@ export function NotificationRow({ entry }: { entry: ActivityEntry }) {
             className="text-[11px] mt-0.5 inline-block truncate max-w-[200px]"
             style={{ color: 'var(--text-link)' }}
           >
-            {entry.targetProfileUrl.replace('https://linkedin.com/in/', '').replace(/\/$/, '')}
+            {entry.targetProfileUrl
+              .replace('https://linkedin.com/in/', '')
+              .replace(/\/$/, '')}
           </a>
         )}
       </div>
 
-      {/* Time */}
-      <span className="text-[10px] flex-shrink-0 mt-0.5" style={{ color: 'var(--text-muted)' }}>
+      {/* Timestamp */}
+      <span
+        className="text-[10px] flex-shrink-0 mt-0.5"
+        style={{ color: 'var(--text-muted)' }}
+      >
         {timeAgo(entry.timestamp)}
       </span>
     </div>

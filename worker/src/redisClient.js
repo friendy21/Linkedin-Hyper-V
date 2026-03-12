@@ -37,11 +37,11 @@ function createRedisClient() {
     maxRetriesPerRequest: null,
     enableReadyCheck: false,
   });
-  
+
   client.on('error', (err) => {
     console.error('[Redis Client] Connection error:', err.message);
   });
-  
+
   return client;
 }
 

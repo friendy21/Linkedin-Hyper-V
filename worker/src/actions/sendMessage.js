@@ -1,9 +1,5 @@
 'use strict';
 
-/**
- * Sends a message in an existing LinkedIn conversation thread.
- */
-
 const { getAccountContext }            = require('../browser');
 const { loadCookies, saveCookies }     = require('../session');
 const { delay, humanClick, humanType } = require('../humanBehavior');
@@ -11,7 +7,7 @@ const { checkAndIncrement }            = require('../rateLimit');
 const { getRedis }                     = require('../redisClient');
 
 async function sendMessage({ accountId, chatId, text, proxyUrl }) {
-  await checkAndIncrement(accountId, 'messagesSent');
+  await checkAndIncrement(accountId, 'messagesSent'); // FIRST
 
   const { context } = await getAccountContext(accountId, proxyUrl);
   let page;
@@ -34,39 +30,46 @@ async function sendMessage({ accountId, chatId, text, proxyUrl }) {
 
     await delay(2000, 4000);
 
-    // Type the message
     await humanType(page, '.msg-form__contenteditable, [data-view-name="messaging-compose-box"] [contenteditable]', text);
     await delay(800, 1800);
 
-    // Send
     await humanClick(page, '.msg-form__send-button, button[type="submit"][aria-label*="Send"]');
     await delay(1500, 3000);
 
     await saveCookies(accountId, await context.cookies());
 
     const msgId = `sent-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    
-    // Try to extract the real participant name
+
+    // Try to extract real participant name from thread header
     let participantName = 'Unknown';
+    let profileUrl = null;
     try {
       const nameEl = await page.$('.msg-thread__name, .msg-entity-lockup__entity-title');
       if (nameEl) {
-        const text = await nameEl.textContent();
-        if (text) participantName = text.trim();
+        const nameText = await nameEl.textContent();
+        if (nameText) participantName = nameText.trim();
+        
+        // Try to get profile URL from parent link or nearby link
+        const linkEl = await page.$('.msg-entity-lockup__entity-title-container a, .msg-thread__link');
+        if (linkEl) {
+          const href = await linkEl.getAttribute('href');
+          if (href) profileUrl = new URL(href, 'https://www.linkedin.com').href;
+        }
       }
     } catch (_) {}
 
+    // Log activity — targetProfileUrl is now correctly parsed or null
     const redis = getRedis();
     const entry = JSON.stringify({
       type: 'messageSent',
       accountId,
       targetName: participantName,
-      targetProfileUrl: chatId,
+      targetProfileUrl: profileUrl,
       message: text,
       timestamp: Date.now(),
     });
     await redis.lpush(`activity:log:${accountId}`, entry);
-    await redis.ltrim(`activity:log:${accountId}`, 0, 999);
+    await redis.ltrim(`activity:log:${accountId}`, 0, 999); // cap at 1000 entries
     await redis.incr(`stats:messages:${accountId}`);
 
     return {

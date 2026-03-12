@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import type { Conversation, Account, Message } from '@/types/dashboard';
+import type { Conversation, Account } from '@/types/dashboard';
 import { getUnifiedInbox, getAccounts, getConversationThread } from '@/lib/api-client';
 import { ConversationList } from '@/components/inbox/ConversationList';
 import { MessageThread } from '@/components/inbox/MessageThread';
@@ -9,15 +9,16 @@ import { Spinner } from '@/components/ui/Spinner';
 import { ErrorState } from '@/components/ui/ErrorState';
 
 export default function InboxPage() {
-  const [accounts, setAccounts]           = useState<Account[]>([]);
+  const [accounts,      setAccounts]      = useState<Account[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [selected, setSelected]           = useState<Conversation | null>(null);
-  const [filter, setFilter]               = useState<string>('all');
-  const [loading, setLoading]             = useState(true);
-  const [error, setError]                 = useState<string | null>(null);
+  const [selected,      setSelected]      = useState<Conversation | null>(null);
+  const [filter,        setFilter]        = useState<string>('all');
+  const [loading,       setLoading]       = useState(true);
+  const [error,         setError]         = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
+      // Fetch in parallel — inbox + accounts
       const [inboxData, accountsData] = await Promise.all([
         getUnifiedInbox(),
         getAccounts(),
@@ -34,6 +35,7 @@ export default function InboxPage() {
 
   useEffect(() => {
     void load();
+    // Silent background refresh every 120s — does NOT reset loading state
     const interval = setInterval(() => void load(), 120_000);
     return () => clearInterval(interval);
   }, [load]);
@@ -44,12 +46,12 @@ export default function InboxPage() {
       : conversations.filter((c) => c.accountId === filter);
 
   async function handleSelect(conv: Conversation) {
-    setSelected(conv); // optimistic UI, show immediately
+    setSelected(conv); // immediate optimistic UI update
     try {
       const thread = await getConversationThread(conv.accountId, conv.conversationId);
       setSelected({ ...conv, messages: thread.messages });
     } catch {
-      // ignore, thread shows up with previous messages or empty
+      // ignore — thread shows with previous messages or empty
     }
   }
 

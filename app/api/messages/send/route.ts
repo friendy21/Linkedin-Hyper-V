@@ -18,8 +18,8 @@ export async function POST(req: NextRequest) {
     };
 
     const accountId = requireString(body.accountId ?? null, 'accountId');
-    const chatId = requireString(body.chatId ?? null, 'chatId');
-    const text = requireString(body.text ?? null, 'text');
+    const chatId    = requireString(body.chatId    ?? null, 'chatId');
+    const text      = requireString(body.text      ?? null, 'text');
 
     return forwardToBackend({
       method: 'POST',

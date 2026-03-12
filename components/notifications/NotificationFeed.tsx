@@ -5,10 +5,10 @@ import { NotificationRow } from './NotificationItem';
 import { AccountBadge } from '@/components/ui/AccountBadge';
 
 const TABS: { id: ActivityTab; label: string }[] = [
-  { id: 'all',             label: 'All' },
-  { id: 'messageSent',     label: 'Messages' },
-  { id: 'connectionSent',  label: 'Connections' },
-  { id: 'profileViewed',   label: 'Profile Views' },
+  { id: 'all',            label: 'All'           },
+  { id: 'messageSent',    label: 'Messages'      },
+  { id: 'connectionSent', label: 'Connections'   },
+  { id: 'profileViewed',  label: 'Profile Views' },
 ];
 
 interface NotificationFeedProps {
@@ -53,8 +53,11 @@ export function NotificationFeed({
         </div>
       </div>
 
-      {/* Tab filter */}
-      <div className="flex gap-1 px-6 py-3" style={{ borderBottom: '1px solid var(--border)' }}>
+      {/* Tabs */}
+      <div
+        className="flex gap-1 px-6 py-3"
+        style={{ borderBottom: '1px solid var(--border)' }}
+      >
         {TABS.map(({ id, label }) => {
           const isActive = activeTab === id;
           return (
@@ -63,11 +66,11 @@ export function NotificationFeed({
               onClick={() => onTabChange(id)}
               className="px-3 py-1.5 rounded-lg text-sm font-medium transition-colors"
               style={{
-                background: isActive ? 'var(--accent)' : 'var(--bg-card)',
-                color: isActive ? '#fff' : 'var(--text-muted)',
-                border: '1px solid',
-                borderColor: isActive ? 'var(--accent)' : 'var(--border)',
-                cursor: 'pointer',
+                background:  isActive ? 'var(--accent)'  : 'var(--bg-card)',
+                color:       isActive ? '#fff'           : 'var(--text-muted)',
+                border:      '1px solid',
+                borderColor: isActive ? 'var(--accent)'  : 'var(--border)',
+                cursor:      'pointer',
               }}
             >
               {label}
@@ -84,7 +87,10 @@ export function NotificationFeed({
           </div>
         ) : (
           entries.map((entry, idx) => (
-            <NotificationRow key={`${entry.accountId}-${entry.timestamp}-${idx}`} entry={entry} />
+            <NotificationRow
+              key={`${entry.accountId}-${entry.timestamp}-${idx}`}
+              entry={entry}
+            />
           ))
         )}
       </div>

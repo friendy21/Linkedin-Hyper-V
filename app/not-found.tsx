@@ -1,30 +1,42 @@
-import Link from 'next/link';
-import { Container } from '@/components/ui/Container';
-import { Button } from '@/components/ui/Button';
-
 export default function NotFound() {
   return (
-    <main className="min-h-screen bg-gray-50 flex items-center">
-      <Container>
-        <div className="max-w-2xl mx-auto text-center py-16 px-4 sm:py-24 sm:px-6 lg:px-8">
-          <p className="text-base font-semibold text-[#49648C] tracking-wide uppercase">
-            404 Error
-          </p>
-          <h1 className="mt-2 text-4xl font-extrabold text-[#0B1F3B] tracking-tight sm:text-5xl">
-            Page Not Found
-          </h1>
-          <p className="mt-4 text-base text-gray-500 mb-8">
-            Sorry, we couldn&apos;t find the page you&apos;re looking for. It might have been moved or doesn&apos;t exist.
-          </p>
-          <div className="mt-6">
-            <Link href="/" passHref>
-              <Button variant="primary" size="lg" className="inline-flex items-center">
-                Return Home
-              </Button>
-            </Link>
-          </div>
-        </div>
-      </Container>
+    <main
+      className="min-h-screen flex items-center justify-center"
+      style={{ background: 'var(--bg-base)' }}
+    >
+      <div className="max-w-2xl mx-auto text-center py-16 px-6">
+        <p
+          className="text-base font-semibold tracking-wide uppercase"
+          style={{ color: 'var(--accent)' }}
+        >
+          404 Error
+        </p>
+        <h1
+          className="mt-2 text-4xl font-extrabold tracking-tight sm:text-5xl"
+          style={{ color: 'var(--text-primary)' }}
+        >
+          Page Not Found
+        </h1>
+        <p className="mt-4 text-base mb-8" style={{ color: 'var(--text-muted)' }}>
+          Sorry, we couldn&apos;t find the page you&apos;re looking for. It might have
+          been moved or doesn&apos;t exist.
+        </p>
+        <a
+          href="/"
+          className="inline-flex items-center px-6 py-3 rounded-lg text-sm font-medium text-white transition-colors"
+          style={{ background: 'var(--accent)' }}
+          onMouseEnter={(e) =>
+            ((e.currentTarget as HTMLAnchorElement).style.background =
+              'var(--accent-hover)')
+          }
+          onMouseLeave={(e) =>
+            ((e.currentTarget as HTMLAnchorElement).style.background =
+              'var(--accent)')
+          }
+        >
+          Return Home
+        </a>
+      </div>
     </main>
   );
 }

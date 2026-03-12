@@ -10,12 +10,13 @@ function toNormalizedString(value) {
 function sanitizeText(value, { maxLength = 3000 } = {}) {
   const normalized = toNormalizedString(value)
     .replace(/\r\n/g, '\n')
-    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '');
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, ''); // strip C0/C1 except \n
 
   return normalized.trim().slice(0, maxLength);
 }
 
 function sanitizeNote(value) {
+  // Same as sanitizeText + max 300 chars + collapse ALL internal whitespace
   return sanitizeText(value, { maxLength: 300 }).replace(/\s+/g, ' ').trim();
 }
 
@@ -72,4 +73,3 @@ module.exports = {
   validateProfileUrl,
   parseLimit,
 };
-

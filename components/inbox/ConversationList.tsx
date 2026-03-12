@@ -32,7 +32,10 @@ export function ConversationList({
     >
       {/* Header */}
       <div className="px-4 pt-4 pb-3">
-        <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+        <p
+          className="text-xs font-semibold uppercase tracking-wider"
+          style={{ color: 'var(--text-muted)' }}
+        >
           Live Hook
         </p>
         <h2 className="text-sm font-semibold mt-0.5" style={{ color: 'var(--text-primary)' }}>
@@ -47,7 +50,10 @@ export function ConversationList({
       </div>
 
       {/* Account filter pills */}
-      <div className="flex gap-1 px-3 pb-3 flex-wrap" style={{ borderBottom: '1px solid var(--border)' }}>
+      <div
+        className="flex gap-1 px-3 pb-3 flex-wrap"
+        style={{ borderBottom: '1px solid var(--border)' }}
+      >
         {['all', ...accounts.map((a) => a.id)].map((acc) => {
           const isActive = filter === acc;
           return (
@@ -56,11 +62,11 @@ export function ConversationList({
               onClick={() => onFilterChange(acc)}
               className="px-2 py-1 rounded text-xs font-medium transition-colors"
               style={{
-                background: isActive ? 'var(--accent)' : 'var(--bg-card)',
-                color: isActive ? '#fff' : 'var(--text-muted)',
-                border: '1px solid',
-                borderColor: isActive ? 'var(--accent)' : 'var(--border)',
-                cursor: 'pointer',
+                background:  isActive ? 'var(--accent)'    : 'var(--bg-card)',
+                color:       isActive ? '#fff'             : 'var(--text-muted)',
+                border:      '1px solid',
+                borderColor: isActive ? 'var(--accent)'    : 'var(--border)',
+                cursor:      'pointer',
               }}
             >
               {acc === 'all' ? 'All' : acc}
@@ -71,7 +77,10 @@ export function ConversationList({
 
       {/* Section label */}
       <div className="px-4 py-2 flex items-center justify-between">
-        <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>
+        <span
+          className="text-[10px] font-bold uppercase tracking-widest"
+          style={{ color: 'var(--text-muted)' }}
+        >
           Conversations
         </span>
         {totalUnread > 0 && <UnreadBadge count={totalUnread} />}
@@ -81,7 +90,9 @@ export function ConversationList({
       <div className="flex-1 overflow-y-auto">
         {conversations.length === 0 ? (
           <div className="flex items-center justify-center h-32">
-            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>No conversations</p>
+            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+              No conversations
+            </p>
           </div>
         ) : (
           conversations.map((conv) => {
@@ -92,13 +103,14 @@ export function ConversationList({
                 onClick={() => onSelect(conv)}
                 className="flex items-start gap-3 px-4 py-3 cursor-pointer transition-colors"
                 style={{
-                  background: isSelected ? 'var(--bg-hover)' : 'transparent',
+                  background:  isSelected ? 'var(--bg-hover)' : 'transparent',
                   borderBottom: '1px solid var(--border)',
-                  borderLeft: isSelected ? '2px solid var(--accent)' : '2px solid transparent',
+                  borderLeft:  isSelected ? '2px solid var(--accent)' : '2px solid transparent',
                 }}
                 onMouseEnter={(e) => {
                   if (!isSelected)
-                    (e.currentTarget as HTMLDivElement).style.background = 'rgba(34,34,46,0.5)';
+                    (e.currentTarget as HTMLDivElement).style.background =
+                      'rgba(34,34,46,0.5)';
                 }}
                 onMouseLeave={(e) => {
                   if (!isSelected)
@@ -109,7 +121,10 @@ export function ConversationList({
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-1.5 min-w-0">
-                      <span className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>
+                      <span
+                        className="text-sm font-medium truncate"
+                        style={{ color: 'var(--text-primary)' }}
+                      >
                         {conv.participant.name}
                       </span>
                       <AccountBadge name={conv.accountId} />
@@ -122,7 +137,8 @@ export function ConversationList({
                     </div>
                   </div>
                   <p className="text-xs truncate mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                    {conv.lastMessage.sentByMe ? 'You: ' : ''}{conv.lastMessage.text}
+                    {conv.lastMessage.sentByMe ? 'You: ' : ''}
+                    {conv.lastMessage.text}
                   </p>
                 </div>
               </div>

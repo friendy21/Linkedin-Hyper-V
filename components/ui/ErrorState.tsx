@@ -14,7 +14,10 @@ export function ErrorState({ message, onRetry }: ErrorStateProps) {
       >
         ⚠
       </div>
-      <p className="text-sm text-center max-w-xs" style={{ color: 'var(--text-muted)' }}>
+      <p
+        className="text-sm text-center max-w-xs"
+        style={{ color: 'var(--text-muted)' }}
+      >
         {message}
       </p>
       {onRetry && (
@@ -28,10 +31,12 @@ export function ErrorState({ message, onRetry }: ErrorStateProps) {
             cursor: 'pointer',
           }}
           onMouseEnter={(e) =>
-            ((e.currentTarget as HTMLButtonElement).style.background = 'var(--accent-hover)')
+            ((e.currentTarget as HTMLButtonElement).style.background =
+              'var(--accent-hover)')
           }
           onMouseLeave={(e) =>
-            ((e.currentTarget as HTMLButtonElement).style.background = 'var(--accent)')
+            ((e.currentTarget as HTMLButtonElement).style.background =
+              'var(--accent)')
           }
         >
           Retry

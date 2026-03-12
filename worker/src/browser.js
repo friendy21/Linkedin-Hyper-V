@@ -86,13 +86,15 @@ const activeContexts = new Map();
 async function getAccountContext(accountId, proxyUrl) {
   const existing = activeContexts.get(accountId);
   if (existing) {
+    // Cache hit — reset idle timer and clear stale cookies
     clearTimeout(existing.timer);
     existing.lastUsed = Date.now();
-    existing.timer = setTimeout(() => cleanupContext(accountId), 5 * 60 * 1000); // 5 mins
-    await existing.context.clearCookies();
+    existing.timer = setTimeout(() => cleanupContext(accountId), 5 * 60 * 1000);
+    await existing.context.clearCookies(); // prevents stale cookie bleed between jobs
     return { browser: existing.browser, context: existing.context };
   }
 
+  // Cache miss — launch new browser + context
   const browser = await createBrowser(proxyUrl);
   const context = await createContext(browser);
 
@@ -117,6 +119,7 @@ async function cleanupAllContexts() {
   }
 }
 
+// Ensure Chrome processes are not orphaned on container shutdown
 process.on('SIGTERM', async () => {
   await cleanupAllContexts();
   process.exit(0);

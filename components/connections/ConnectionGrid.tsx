@@ -43,7 +43,7 @@ export function ConnectionGrid({
             {total}
           </span>
         </div>
-        {/* Search */}
+        {/* Search input */}
         <div
           className="flex items-center gap-2 px-3 py-1.5 rounded-lg"
           style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}
@@ -51,7 +51,7 @@ export function ConnectionGrid({
           <Search size={14} color="var(--text-muted)" />
           <input
             type="text"
-            placeholder="Search..."
+            placeholder="Search…"
             value={search}
             onChange={(e) => onSearchChange(e.target.value)}
             className="bg-transparent text-sm outline-none w-36"
@@ -61,7 +61,10 @@ export function ConnectionGrid({
       </div>
 
       {/* Account filter pills */}
-      <div className="flex gap-2 px-6 py-3" style={{ borderBottom: '1px solid var(--border)' }}>
+      <div
+        className="flex gap-2 px-6 py-3"
+        style={{ borderBottom: '1px solid var(--border)' }}
+      >
         {['all', ...accounts.map((a) => a.id)].map((acc) => {
           const isActive = filter === acc;
           return (
@@ -70,11 +73,11 @@ export function ConnectionGrid({
               onClick={() => onFilterChange(acc)}
               className="px-3 py-1 rounded-full text-sm font-medium transition-colors"
               style={{
-                background: isActive ? 'var(--accent)' : 'var(--bg-card)',
-                color: isActive ? '#fff' : 'var(--text-muted)',
-                border: '1px solid',
+                background:  isActive ? 'var(--accent)' : 'var(--bg-card)',
+                color:       isActive ? '#fff'          : 'var(--text-muted)',
+                border:      '1px solid',
                 borderColor: isActive ? 'var(--accent)' : 'var(--border)',
-                cursor: 'pointer',
+                cursor:      'pointer',
               }}
             >
               {acc === 'all' ? 'All Accounts' : acc}
@@ -110,7 +113,8 @@ export function ConnectionGrid({
                   key={`${conn.accountId}-${conn.profileUrl}-${idx}`}
                   style={{ borderBottom: '1px solid var(--border)' }}
                   onMouseEnter={(e) =>
-                    ((e.currentTarget as HTMLTableRowElement).style.background = 'var(--bg-hover)')
+                    ((e.currentTarget as HTMLTableRowElement).style.background =
+                      'var(--bg-hover)')
                   }
                   onMouseLeave={(e) =>
                     ((e.currentTarget as HTMLTableRowElement).style.background = 'transparent')
@@ -119,7 +123,10 @@ export function ConnectionGrid({
                   <td className="px-6 py-3">
                     <div className="flex items-center gap-3">
                       <Avatar name={conn.name} size="sm" />
-                      <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                      <span
+                        className="text-sm font-medium"
+                        style={{ color: 'var(--text-primary)' }}
+                      >
                         {conn.name}
                       </span>
                     </div>

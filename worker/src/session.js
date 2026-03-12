@@ -3,9 +3,9 @@
 const crypto = require('crypto');
 const { getRedis } = require('./redisClient');
 
-const ALGORITHM    = 'aes-256-gcm';
-const SESSION_TTL  = 86400 * 30; // 30 days
-const META_TTL     = 86400 * 30;
+const ALGORITHM   = 'aes-256-gcm';
+const SESSION_TTL = 86400 * 30; // 30 days
+const META_TTL    = 86400 * 30;
 
 function getKey() {
   const hex = process.env.SESSION_ENCRYPTION_KEY;
@@ -19,11 +19,11 @@ function getKey() {
 }
 
 function encrypt(plaintext) {
-  const iv      = crypto.randomBytes(16);
-  const key     = getKey();
-  const cipher  = crypto.createCipheriv(ALGORITHM, key, iv);
-  const enc     = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
-  const tag     = cipher.getAuthTag();
+  const iv     = crypto.randomBytes(16);
+  const key    = getKey();
+  const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
+  const enc    = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
+  const tag    = cipher.getAuthTag();
   return JSON.stringify({
     iv:   iv.toString('hex'),
     tag:  tag.toString('hex'),
@@ -50,18 +50,18 @@ function normaliseCookies(cookies) {
       const v = (c.sameSite || '').toLowerCase();
       if (v === 'strict') return 'Strict';
       if (v === 'lax')    return 'Lax';
-      return 'None';
+      return 'None';  // default fallback — NOT 'Lax'
     })(),
   }));
 }
 
 async function saveCookies(accountId, cookies) {
-  const redis      = getRedis();
+  const redis     = getRedis();
   const normalised = normaliseCookies(cookies);
   const encrypted  = encrypt(JSON.stringify(normalised));
   const now        = Date.now();
 
-  await redis.set(`session:${accountId}`,      encrypted,               'EX', SESSION_TTL);
+  await redis.set(`session:${accountId}`,      encrypted,                    'EX', SESSION_TTL);
   await redis.set(`session:meta:${accountId}`, JSON.stringify({ savedAt: now }), 'EX', META_TTL);
 }
 

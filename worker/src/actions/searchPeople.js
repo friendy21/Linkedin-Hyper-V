@@ -1,17 +1,12 @@
 'use strict';
 
-/**
- * Searches LinkedIn for people matching a query string.
- * Returns a list of WorkerProfile objects.
- */
-
-const { getAccountContext } = require('../browser');
-const { loadCookies, saveCookies }     = require('../session');
-const { delay, humanScroll }           = require('../humanBehavior');
-const { checkAndIncrement }            = require('../rateLimit');
+const { getAccountContext }        = require('../browser');
+const { loadCookies, saveCookies } = require('../session');
+const { delay, humanScroll }       = require('../humanBehavior');
+const { checkAndIncrement }        = require('../rateLimit');
 
 async function searchPeople({ accountId, query, proxyUrl, limit = 10 }) {
-  await checkAndIncrement(accountId, 'searchQueries');
+  await checkAndIncrement(accountId, 'searchQueries'); // FIRST
 
   const { context } = await getAccountContext(accountId, proxyUrl);
   let page;
@@ -54,7 +49,7 @@ async function searchPeople({ accountId, query, proxyUrl, limit = 10 }) {
           const href       = linkEl?.href || '';
           const profileId  = href.match(/\/in\/([^/?]+)/)?.[1] || `unknown-${Date.now()}`;
 
-          if (!nameEl) continue;
+          if (!nameEl) continue; // skip cards without a name
 
           results.push({
             id:         profileId,
@@ -72,7 +67,7 @@ async function searchPeople({ accountId, query, proxyUrl, limit = 10 }) {
 
     await saveCookies(accountId, await context.cookies());
 
-    return profiles;
+    return profiles; // returns array directly, not wrapped in { items }
   } finally {
     if (page) await page.close().catch(() => {});
   }

@@ -1,7 +1,7 @@
 'use strict';
 
 const { Worker } = require('bullmq');
-const { getRedis, createRedisClient }  = require('./redisClient');
+const { createRedisClient }             = require('./redisClient');
 
 const { verifySession }         = require('./actions/login');
 const { readMessages }          = require('./actions/readMessages');
@@ -16,7 +16,7 @@ const CONCURRENCY = 1;
 
 function startWorker() {
   const worker = new Worker(
-    'linkedin-jobs',
+    'linkedin-jobs',  // MUST match queue name in queue.js
     async (job) => {
       const { name, data } = job;
       console.log(`[Worker] Processing job ${job.id}: ${name}`);
@@ -34,7 +34,7 @@ function startWorker() {
       }
     },
     {
-      connection:  createRedisClient(),
+      connection:  createRedisClient(), // dedicated connection for BullMQ worker
       concurrency: CONCURRENCY,
     }
   );

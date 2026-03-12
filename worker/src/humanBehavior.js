@@ -22,13 +22,14 @@ async function humanClick(page, selector, options = {}) {
   const box = await el.boundingBox();
   if (!box) throw new Error(`Element not visible: ${selector}`);
 
-  // Random landing point inside the element (avoid edges)
+  // Random landing point inside the element (avoid edges — 25% to 75% range)
   const x = box.x + box.width  * (0.25 + Math.random() * 0.5);
   const y = box.y + box.height * (0.25 + Math.random() * 0.5);
 
-  // Approach from a nearby offset
+  // Coarse approach from a nearby random offset
   await page.mouse.move(x + randInt(-80, 80), y + randInt(-40, 40), { steps: randInt(6, 12) });
   await delay(80, 250);
+  // Fine approach to exact target
   await page.mouse.move(x, y, { steps: randInt(8, 16) });
   await delay(60, 180);
   await page.mouse.click(x, y);
@@ -42,11 +43,12 @@ async function humanType(page, selector, text, options = {}) {
   await humanClick(page, selector, options);
   await delay(150, 350);
 
+  // Second-layer sanitisation (first layer is in Express routes)
   const saneText = sanitizeText(text, { maxLength: 3000 });
 
   for (const char of saneText) {
     await page.keyboard.type(char, { delay: randInt(55, 130) });
-    // ~4% chance of a thinking pause
+    // ~4% chance of a thinking pause per character
     if (Math.random() < 0.04) await delay(350, 800);
   }
 }

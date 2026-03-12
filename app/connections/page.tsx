@@ -9,11 +9,11 @@ import { ErrorState } from '@/components/ui/ErrorState';
 
 export default function ConnectionsPage() {
   const [connections, setConnections] = useState<Connection[]>([]);
-  const [accounts, setAccounts]       = useState<Account[]>([]);
-  const [search, setSearch]           = useState('');
-  const [filter, setFilter]           = useState<string>('all');
-  const [loading, setLoading]         = useState(true);
-  const [error, setError]             = useState<string | null>(null);
+  const [accounts,    setAccounts]    = useState<Account[]>([]);
+  const [search,      setSearch]      = useState('');
+  const [filter,      setFilter]      = useState<string>('all');
+  const [loading,     setLoading]     = useState(true);
+  const [error,       setError]       = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -26,9 +26,9 @@ export default function ConnectionsPage() {
           return entries
             .filter((e) => e.type === 'connectionSent')
             .map((e): Connection => ({
-              accountId: a.id,
-              name: e.targetName,
-              profileUrl: e.targetProfileUrl,
+              accountId:   a.id,
+              name:        e.targetName,
+              profileUrl:  e.targetProfileUrl,
               connectedAt: e.timestamp,
             }));
         })
@@ -49,6 +49,7 @@ export default function ConnectionsPage() {
 
   useEffect(() => {
     void load();
+    // No polling — connections page is a static view, refresh on mount only
   }, [load]);
 
   const filtered = connections

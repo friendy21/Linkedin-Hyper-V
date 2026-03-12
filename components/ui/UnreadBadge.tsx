@@ -7,7 +7,7 @@ interface UnreadBadgeProps {
 
 export function UnreadBadge({ count, color = 'red' }: UnreadBadgeProps) {
   const label = formatCount(count);
-  if (!label) return null;
+  if (!label) return null;   // returns null at count === 0
 
   return (
     <span

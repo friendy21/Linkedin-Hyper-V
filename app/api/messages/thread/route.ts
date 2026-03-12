@@ -11,8 +11,14 @@ export async function GET(req: NextRequest) {
   if (authError) return authError;
 
   try {
-    const accountId = requireString(req.nextUrl.searchParams.get('accountId'), 'accountId');
-    const chatId = requireString(req.nextUrl.searchParams.get('chatId'), 'chatId');
+    const accountId = requireString(
+      req.nextUrl.searchParams.get('accountId'),
+      'accountId'
+    );
+    const chatId = requireString(
+      req.nextUrl.searchParams.get('chatId'),
+      'chatId'
+    );
 
     return forwardToBackend({
       method: 'GET',
