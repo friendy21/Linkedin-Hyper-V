@@ -7,6 +7,13 @@ const { getQueue, getQueueEvents }   = require('./queue');
 const { startWorker }  = require('./worker');
 const { saveCookies, loadCookies, sessionMeta, deleteSession } = require('./session');
 const { getLimits }    = require('./rateLimit');
+const {
+  sanitizeText,
+  sanitizeNote,
+  validateId,
+  validateProfileUrl,
+  parseLimit,
+} = require('./sanitizers');
 
 const app  = express();
 const PORT = process.env.PORT || 3001;
@@ -184,7 +191,8 @@ app.post('/accounts/:accountId/verify', async (req, res) => {
     });
     res.json(result);
   } catch (err) {
-    res.status(err.status || 500).json({ error: err.message, code: err.code });
+    const status = err.status || (err.message ? 400 : 500);
+    res.status(status).json({ error: err.message, code: err.code });
   }
 });
 
@@ -194,17 +202,18 @@ app.post('/accounts/:accountId/verify', async (req, res) => {
  */
 app.get('/messages/inbox', async (req, res) => {
   try {
-    const { accountId, limit } = req.query;
-    if (!accountId) return res.status(400).json({ error: 'accountId is required' });
+    const accountId = validateId(req.query.accountId, { field: 'accountId' });
+    const limit = parseLimit(req.query.limit, 20);
 
     const result = await runJob('readMessages', {
       accountId,
-      limit:    parseInt(limit || '20', 10),
+      limit,
       proxyUrl: process.env.PROXY_URL || null,
     });
     res.json(result);
   } catch (err) {
-    res.status(err.status || 500).json({ error: err.message, code: err.code });
+    const status = err.status || (err.message ? 400 : 500);
+    res.status(status).json({ error: err.message, code: err.code });
   }
 });
 
@@ -214,20 +223,20 @@ app.get('/messages/inbox', async (req, res) => {
  */
 app.get('/messages/thread', async (req, res) => {
   try {
-    const { accountId, chatId, limit } = req.query;
-    if (!accountId || !chatId) {
-      return res.status(400).json({ error: 'accountId and chatId are required' });
-    }
+    const accountId = validateId(req.query.accountId, { field: 'accountId' });
+    const chatId = validateId(req.query.chatId, { field: 'chatId' });
+    const limit = parseLimit(req.query.limit, 50);
 
     const result = await runJob('readThread', {
       accountId,
       chatId,
-      limit:    parseInt(limit || '50', 10),
+      limit,
       proxyUrl: process.env.PROXY_URL || null,
     });
     res.json(result);
   } catch (err) {
-    res.status(err.status || 500).json({ error: err.message, code: err.code });
+    const status = err.status || (err.message ? 400 : 500);
+    res.status(status).json({ error: err.message, code: err.code });
   }
 });
 
@@ -238,9 +247,11 @@ app.get('/messages/thread', async (req, res) => {
  */
 app.post('/messages/send', async (req, res) => {
   try {
-    const { accountId, chatId, text } = req.body;
-    if (!accountId || !chatId || !text) {
-      return res.status(400).json({ error: 'accountId, chatId and text are required' });
+    const accountId = validateId(req.body?.accountId, { field: 'accountId' });
+    const chatId = validateId(req.body?.chatId, { field: 'chatId' });
+    const text = sanitizeText(req.body?.text, { maxLength: 3000 });
+    if (!text) {
+      return res.status(400).json({ error: 'text is required' });
     }
 
     const result = await runJob('sendMessage', {
@@ -249,7 +260,8 @@ app.post('/messages/send', async (req, res) => {
     });
     res.json(result);
   } catch (err) {
-    res.status(err.status || 500).json({ error: err.message, code: err.code });
+    const status = err.status || (err.message ? 400 : 500);
+    res.status(status).json({ error: err.message, code: err.code });
   }
 });
 
@@ -260,9 +272,11 @@ app.post('/messages/send', async (req, res) => {
  */
 app.post('/messages/send-new', async (req, res) => {
   try {
-    const { accountId, profileUrl, text } = req.body;
-    if (!accountId || !profileUrl || !text) {
-      return res.status(400).json({ error: 'accountId, profileUrl and text are required' });
+    const accountId = validateId(req.body?.accountId, { field: 'accountId' });
+    const profileUrl = validateProfileUrl(req.body?.profileUrl);
+    const text = sanitizeText(req.body?.text, { maxLength: 3000 });
+    if (!text) {
+      return res.status(400).json({ error: 'text is required' });
     }
 
     const result = await runJob('sendMessageNew', {
@@ -271,7 +285,8 @@ app.post('/messages/send-new', async (req, res) => {
     });
     res.json(result);
   } catch (err) {
-    res.status(err.status || 500).json({ error: err.message, code: err.code });
+    const status = err.status || (err.message ? 400 : 500);
+    res.status(status).json({ error: err.message, code: err.code });
   }
 });
 
@@ -282,10 +297,9 @@ app.post('/messages/send-new', async (req, res) => {
  */
 app.post('/connections/send', async (req, res) => {
   try {
-    const { accountId, profileUrl, note } = req.body;
-    if (!accountId || !profileUrl) {
-      return res.status(400).json({ error: 'accountId and profileUrl are required' });
-    }
+    const accountId = validateId(req.body?.accountId, { field: 'accountId' });
+    const profileUrl = validateProfileUrl(req.body?.profileUrl);
+    const note = req.body?.note == null ? '' : sanitizeNote(req.body.note);
 
     const result = await runJob('sendConnectionRequest', {
       accountId, profileUrl, note,
@@ -293,7 +307,8 @@ app.post('/connections/send', async (req, res) => {
     }, 90000);
     res.json(result);
   } catch (err) {
-    res.status(err.status || 500).json({ error: err.message, code: err.code });
+    const status = err.status || (err.message ? 400 : 500);
+    res.status(status).json({ error: err.message, code: err.code });
   }
 });
 
