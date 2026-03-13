@@ -8,6 +8,11 @@ services:
     # FIXED: removed host port exposure — Redis must be internal only
     # ports: - "6379:6379"   ← do NOT expose Redis to host
     restart: always
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   worker:
     build:
@@ -23,9 +28,17 @@ services:
       - ACCOUNT_IDS=${ACCOUNT_IDS}
       - API_SECRET=${API_SECRET}
       - PROXY_URL=${PROXY_URL}
+      - HTTP_PROXY=${PROXY_URL}
+      - HTTPS_PROXY=${PROXY_URL}
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
     depends_on:
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3001/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
     restart: always
 
   frontend:
@@ -39,6 +52,10 @@ services:
       - API_SECRET=${API_SECRET}
       - PROXY_AUTH_TOKENS=${PROXY_AUTH_TOKENS}
       - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+      - API_ROUTE_AUTH_TOKEN=${API_ROUTE_AUTH_TOKEN}
+      - PROXY_AUTH_COOKIE_NAME=${PROXY_AUTH_COOKIE_NAME}
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
     depends_on:
-      - worker
+      worker:
+        condition: service_healthy
     restart: always

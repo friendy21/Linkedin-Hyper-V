@@ -3,12 +3,26 @@ import { NextRequest, NextResponse } from 'next/server';
 const API_URL    = process.env.API_URL    ?? 'http://localhost:3001';
 const API_SECRET = process.env.API_SECRET ?? '';
 
-/** Verify the internal X-Api-Key header matches our secret. */
+/** Verify the caller using Origin, Sec-Fetch-Site and API_ROUTE_AUTH_TOKEN according to spec. */
 export function authenticateCaller(req: NextRequest): NextResponse | null {
-  const key = req.headers.get('x-api-key');
-  if (!API_SECRET || key !== API_SECRET) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const origin = req.headers.get('origin');
+  if (origin && origin !== req.nextUrl.origin) {
+    return NextResponse.json({ error: 'Unauthorized origin' }, { status: 403 });
   }
+
+  const secFetchSite = req.headers.get('sec-fetch-site');
+  if (secFetchSite && !['same-origin', 'same-site', 'none'].includes(secFetchSite)) {
+    return NextResponse.json({ error: 'Unauthorized site request' }, { status: 403 });
+  }
+
+  const routeAuthToken = process.env.API_ROUTE_AUTH_TOKEN;
+  if (routeAuthToken) {
+    const authHeader = req.headers.get('authorization');
+    if (!authHeader || authHeader !== `Bearer ${routeAuthToken}`) {
+      return NextResponse.json({ error: 'Unauthorized token' }, { status: 401 });
+    }
+  }
+
   return null;
 }
 

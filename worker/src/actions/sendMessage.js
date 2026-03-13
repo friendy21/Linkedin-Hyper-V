@@ -64,7 +64,7 @@ async function sendMessage({ accountId, chatId, text, proxyUrl }) {
       type: 'messageSent',
       accountId,
       targetName: participantName,
-      targetProfileUrl: profileUrl,
+      targetProfileUrl: profileUrl || "",
       message: text,
       timestamp: Date.now(),
     });
