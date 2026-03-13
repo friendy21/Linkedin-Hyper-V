@@ -58,13 +58,13 @@ async function sendMessage({ accountId, chatId, text, proxyUrl }) {
       }
     } catch (_) {}
 
-    // Log activity — targetProfileUrl is now correctly parsed or null
+    // Log activity — targetProfileUrl is now correctly parsed or empty string
     const redis = getRedis();
     const entry = JSON.stringify({
       type: 'messageSent',
       accountId,
       targetName: participantName,
-      targetProfileUrl: profileUrl || "",
+      targetProfileUrl: profileUrl || '',
       message: text,
       timestamp: Date.now(),
     });

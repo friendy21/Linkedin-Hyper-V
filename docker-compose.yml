@@ -23,6 +23,7 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
       # FIXED: added SESSION_ENCRYPTION_KEY — fatal throw without it
       - SESSION_ENCRYPTION_KEY=${SESSION_ENCRYPTION_KEY}
       - ACCOUNT_IDS=${ACCOUNT_IDS}
@@ -30,16 +31,15 @@ services:
       - PROXY_URL=${PROXY_URL}
       - HTTP_PROXY=${PROXY_URL}
       - HTTPS_PROXY=${PROXY_URL}
-      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
     depends_on:
       redis:
         condition: service_healthy
+    restart: always
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3001/health"]
       interval: 15s
       timeout: 5s
       retries: 3
-    restart: always
 
   frontend:
     build:
