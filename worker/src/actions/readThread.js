@@ -6,18 +6,20 @@ const { delay, humanScroll }       = require('../humanBehavior');
 
 async function readThread({ accountId, chatId, proxyUrl, limit = 50 }) {
   // No rate limit — reading is passive
-  const { context } = await getAccountContext(accountId, proxyUrl);
+  const { context, cookiesLoaded } = await getAccountContext(accountId, proxyUrl);
   let page;
 
   try {
-    const cookies = await loadCookies(accountId);
-    if (!cookies) {
-      const err = new Error(`No session for account ${accountId}`);
-      err.code = 'NO_SESSION'; err.status = 401;
-      throw err;
+    // W1 — Only inject cookies on a cache miss.
+    if (!cookiesLoaded) {
+      const cookies = await loadCookies(accountId);
+      if (!cookies) {
+        const err = new Error(`No session for account ${accountId}`);
+        err.code = 'NO_SESSION'; err.status = 401;
+        throw err;
+      }
+      await context.addCookies(cookies);
     }
-
-    await context.addCookies(cookies);
     page = await context.newPage();
 
     await page.goto(`https://www.linkedin.com/messaging/thread/${chatId}/`, {

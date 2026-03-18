@@ -34,8 +34,10 @@ function startWorker() {
       }
     },
     {
-      connection:  createRedisClient(), // dedicated connection for BullMQ worker
-      concurrency: CONCURRENCY,
+      connection:    createRedisClient(), // dedicated connection for BullMQ worker
+      concurrency:   CONCURRENCY,
+      lockDuration:  120_000, // auto-release lock after 2 min if no heartbeat (crash recovery)
+      lockRenewTime:  60_000, // renew every 60 s for long-running jobs
     }
   );
 

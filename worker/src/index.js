@@ -20,6 +20,16 @@ const PORT = process.env.PORT || 3001;
 
 app.use(express.json({ limit: '2mb' }));
 
+// ── Global request timeout ───────────────────────────────────────────────────
+// Set to 130 s so Express always responds before the BFF AbortSignal (120 s)
+// fires, giving the client a meaningful 504 instead of a connection reset.
+app.use((req, res, next) => {
+  res.setTimeout(130_000, () => {
+    if (!res.headersSent) res.status(504).json({ error: 'Request timed out' });
+  });
+  next();
+});
+
 // ── Auth middleware ──────────────────────────────────────────────────────────
 
 function requireApiKey(req, res, next) {
@@ -127,11 +137,21 @@ app.get('/accounts/:accountId/limits', async (req, res) => {
 
 // ── Job helper (local only — NOT exported) ────────────────────────────────────
 
-async function runJob(name, data, timeoutMs = 300000) {
+async function runJob(name, data, timeoutMs = 120_000) {
   const queue       = getQueue();
   const queueEvents = getQueueEvents();
-  const jobId       = uuidv4();
-  const job         = await queue.add(name, data, { jobId });
+  // Q2 — Deterministic jobId deduplicates the same job within a 30-second window.
+  // BullMQ silently drops adds with a jobId that already exists in the queue.
+  const jobId = `${name}:${data.accountId ?? 'global'}:${Math.floor(Date.now() / 30_000)}`;
+  const job   = await queue.add(name, data, {
+    jobId,
+    // Q1 — Bounded job retention so Redis doesn't accumulate gigabytes of job history.
+    removeOnComplete: { count: 50 },
+    removeOnFail:     { count: 100 },
+    // Q3 — Retry once with exponential backoff (5 s, then 10 s).
+    attempts: 2,
+    backoff:  { type: 'exponential', delay: 5000 },
+  });
 
   try {
     return await job.waitUntilFinished(queueEvents, timeoutMs);
@@ -264,8 +284,17 @@ app.post('/connections/send', async (req, res) => {
 // GET /inbox/unified — triggers parallel inbox reads for all active accounts
 app.get('/inbox/unified', async (req, res) => {
   try {
-    const ids   = (process.env.ACCOUNT_IDS ?? '').split(',').map(s => s.trim()).filter(Boolean);
-    const redis = getRedis();
+    const redis     = getRedis();
+    const cacheKey  = 'cache:unified-inbox';
+
+    // ── Serve from cache if available (TTL 90 s) ──────────────────────────────
+    const cached = await redis.get(cacheKey);
+    if (cached) {
+      res.setHeader('X-Cache', 'HIT');
+      return res.json(JSON.parse(cached));
+    }
+
+    const ids = (process.env.ACCOUNT_IDS ?? '').split(',').map(s => s.trim()).filter(Boolean);
 
     const results = await Promise.allSettled(
       ids.map(async (accountId) => {
@@ -274,7 +303,7 @@ app.get('/inbox/unified', async (req, res) => {
 
         const result = await runJob('readMessages', {
           accountId, limit: 20, proxyUrl: process.env.PROXY_URL || null,
-        }, 120000);
+        });
 
         const items = result?.items ?? [];
         return items.map((chat) => ({
@@ -302,7 +331,13 @@ app.get('/inbox/unified', async (req, res) => {
       .flatMap(r => r.value)
       .sort((a, b) => (b.lastMessage?.sentAt ?? 0) - (a.lastMessage?.sentAt ?? 0));
 
-    res.json({ conversations: all });
+    const payload = { conversations: all };
+
+    // ── Store result in cache (90 s TTL) ──────────────────────────────────────
+    await redis.set(cacheKey, JSON.stringify(payload), 'EX', 90);
+
+    res.setHeader('X-Cache', 'MISS');
+    res.json(payload);
   } catch (err) {
     res.status(500).json({ error: process.env.NODE_ENV === 'production' ? 'Internal error' : err.message });
   }

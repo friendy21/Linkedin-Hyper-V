@@ -52,7 +52,7 @@ interface ForwardOptions {
 /**
  * Forward a request to the worker Express API.
  * Adds X-Api-Key header automatically.
- * Includes a 30-second AbortSignal timeout.
+ * Includes a 120-second AbortSignal timeout (aligned with Express 130 s / runJob 120 s).
  */
 export async function forwardToBackend(opts: ForwardOptions): Promise<NextResponse> {
   const { method, path, query, body } = opts;
@@ -67,14 +67,19 @@ export async function forwardToBackend(opts: ForwardOptions): Promise<NextRespon
         'X-Api-Key': API_SECRET,
       },
       body: body != null ? JSON.stringify(body) : undefined,
-      signal: AbortSignal.timeout(30_000),
+      signal: AbortSignal.timeout(120_000),
     });
 
     const data = await res.text();
-    return new NextResponse(data, {
-      status: res.status,
-      headers: { 'Content-Type': 'application/json' },
-    });
+
+    // Add Cache-Control on successful GET responses so the CDN / Next.js
+    // edge cache can serve stale data while revalidating in the background.
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (method === 'GET' && res.ok) {
+      headers['Cache-Control'] = 'public, max-age=60, stale-while-revalidate=30';
+    }
+
+    return new NextResponse(data, { status: res.status, headers });
   } catch (err) {
     const isTimeout = err instanceof DOMException && err.name === 'TimeoutError';
     return NextResponse.json(

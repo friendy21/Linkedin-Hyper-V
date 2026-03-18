@@ -47,9 +47,9 @@ async function humanType(page, selector, text, options = {}) {
   const saneText = sanitizeText(text, { maxLength: 3000 });
 
   for (const char of saneText) {
-    await page.keyboard.type(char, { delay: randInt(55, 130) });
-    // ~4% chance of a thinking pause per character
-    if (Math.random() < 0.04) await delay(350, 800);
+    await page.keyboard.type(char, { delay: randInt(25, 65) });
+    // ~3% chance of a thinking pause per character
+    if (Math.random() < 0.03) await delay(200, 500);
   }
 }
 

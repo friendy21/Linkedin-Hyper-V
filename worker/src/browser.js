@@ -78,6 +78,13 @@ async function createContext(browser) {
     Object.defineProperty(screen, 'availHeight', { get: () => 728 });
   });
 
+  // W6 — Block unnecessary resources to reduce page load time by 30-60%.
+  // LinkedIn profile pages are image-heavy; we only need the DOM.
+  await context.route('**/*.{png,jpg,jpeg,gif,webp,svg,mp4,woff,woff2}', (r) => r.abort());
+  await context.route('**/li/track**',  (r) => r.abort()); // LinkedIn analytics
+  await context.route('**/beacon**',    (r) => r.abort());
+  await context.route('**/analytics**', (r) => r.abort());
+
   return context;
 }
 
@@ -86,12 +93,12 @@ const activeContexts = new Map();
 async function getAccountContext(accountId, proxyUrl) {
   const existing = activeContexts.get(accountId);
   if (existing) {
-    // Cache hit — reset idle timer and clear stale cookies
+    // Cache hit — cookies are already set from the previous job's saveCookies().
+    // Return cookiesLoaded:true so action files skip the Redis GET + addCookies IPC.
     clearTimeout(existing.timer);
     existing.lastUsed = Date.now();
     existing.timer = setTimeout(() => cleanupContext(accountId), 5 * 60 * 1000);
-    await existing.context.clearCookies(); // prevents stale cookie bleed between jobs
-    return { browser: existing.browser, context: existing.context };
+    return { browser: existing.browser, context: existing.context, cookiesLoaded: true };
   }
 
   // Cache miss — launch new browser + context
@@ -101,7 +108,8 @@ async function getAccountContext(accountId, proxyUrl) {
   const timer = setTimeout(() => cleanupContext(accountId), 5 * 60 * 1000);
   activeContexts.set(accountId, { browser, context, lastUsed: Date.now(), timer });
 
-  return { browser, context };
+  // Cache miss — caller must load cookies from Redis and call addCookies.
+  return { browser, context, cookiesLoaded: false };
 }
 
 async function cleanupContext(accountId) {

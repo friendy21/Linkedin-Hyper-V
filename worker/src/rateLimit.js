@@ -47,13 +47,17 @@ async function checkAndIncrement(accountId, action) {
 
 async function getLimits(accountId) {
   const redis   = getRedis();
-  const results = {};
-  for (const [action, limit] of Object.entries(LIMITS)) {
-    const key     = `ratelimit:${accountId}:${action}:${todayKey()}`;
-    const current = parseInt((await redis.get(key)) || '0', 10);
-    results[action] = { current, limit, remaining: Math.max(0, limit - current) };
-  }
-  return results;
+  const today   = todayKey();
+  const actions = Object.keys(LIMITS);
+  const keys    = actions.map((a) => `ratelimit:${accountId}:${a}:${today}`);
+  const values  = await redis.mget(...keys); // single round-trip instead of N sequential GETs
+  return Object.fromEntries(
+    actions.map((action, i) => {
+      const current = parseInt(values[i] || '0', 10);
+      const limit   = LIMITS[action];
+      return [action, { current, limit, remaining: Math.max(0, limit - current) }];
+    })
+  );
 }
 
 module.exports = { checkAndIncrement, getLimits };

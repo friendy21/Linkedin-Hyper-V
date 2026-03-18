@@ -61,8 +61,11 @@ async function saveCookies(accountId, cookies) {
   const encrypted  = encrypt(JSON.stringify(normalised));
   const now        = Date.now();
 
-  await redis.set(`session:${accountId}`,      encrypted,                    'EX', SESSION_TTL);
-  await redis.set(`session:meta:${accountId}`, JSON.stringify({ savedAt: now }), 'EX', META_TTL);
+  // Pipeline both writes into a single round-trip
+  const pipeline = redis.pipeline();
+  pipeline.set(`session:${accountId}`,      encrypted,                         'EX', SESSION_TTL);
+  pipeline.set(`session:meta:${accountId}`, JSON.stringify({ savedAt: now }), 'EX', META_TTL);
+  await pipeline.exec();
 }
 
 async function loadCookies(accountId) {

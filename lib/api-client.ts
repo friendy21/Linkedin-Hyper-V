@@ -2,12 +2,21 @@ import type { Account, Conversation, ActivityEntry, Message } from '@/types/dash
 
 const BASE = '/api';
 
-async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
+// B1 — Tiered caching strategy per route:
+//  /accounts          → revalidate 300 s (rarely changes)
+//  /stats/all/summary → revalidate 60 s
+//  /inbox/unified     → no-store  (real-time, Redis cache handles freshness)
+//  /messages/thread   → no-store  (real-time)
+async function apiFetch<T>(path: string, options?: RequestInit & { ttl?: number }): Promise<T> {
+  const { ttl, ...rest } = options ?? {};
   const res = await fetch(`${BASE}/${path}`, {
-    cache: 'no-store',
-    ...options,
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
-  });
+    cache: ttl ? 'force-cache' : 'no-store',
+    // `next` is a Next.js extension of the standard RequestInit.
+    // Cast needed because the ambient type may not include it.
+    ...(ttl ? { next: { revalidate: ttl } } : {}),
+    ...rest,
+    headers: { 'Content-Type': 'application/json', ...rest.headers },
+  } as RequestInit);
 
   if (!res.ok) {
     let errorDetail = res.statusText;
@@ -22,7 +31,8 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export async function getAccounts(): Promise<{ accounts: Account[] }> {
-  return apiFetch<{ accounts: Account[] }>('accounts');
+  // Accounts rarely change — 5-minute ISR cache avoids a backend hit on every poll tick.
+  return apiFetch<{ accounts: Account[] }>('accounts', { ttl: 300 });
 }
 
 export async function getUnifiedInbox(): Promise<{ conversations: Conversation[] }> {
@@ -61,7 +71,8 @@ export async function getAllAccountsSummary(): Promise<{
   accounts: Record<string, { id: string; totalActivity: number }>;
   totalMessages: number; totalConnections: number;
 }> {
-  return apiFetch('stats/all/summary');
+  // Stats summary revalidates every 60 s — fast enough to feel current.
+  return apiFetch('stats/all/summary', { ttl: 60 });
 }
 
 export async function sendMessage(
@@ -72,3 +83,4 @@ export async function sendMessage(
     body: JSON.stringify({ accountId, chatId, text }),
   });
 }
+

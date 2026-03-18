@@ -7,20 +7,21 @@ const { checkAndIncrement } = require('../rateLimit');
 const { getRedis } = require('../redisClient');
 
 async function sendConnectionRequest({ accountId, profileUrl, note, proxyUrl }) {
-  await checkAndIncrement(accountId, 'connectRequests'); // FIRST
-
-  const { context } = await getAccountContext(accountId, proxyUrl);
+  // W2 — checkAndIncrement moved to AFTER successful send-invitation click.
+  const { context, cookiesLoaded } = await getAccountContext(accountId, proxyUrl);
   let page;
 
   try {
-    const cookies = await loadCookies(accountId);
-    if (!cookies) {
-      const err = new Error(`No session for account ${accountId}`);
-      err.code = 'NO_SESSION'; err.status = 401;
-      throw err;
+    // W1 — Only inject cookies on a cache miss.
+    if (!cookiesLoaded) {
+      const cookies = await loadCookies(accountId);
+      if (!cookies) {
+        const err = new Error(`No session for account ${accountId}`);
+        err.code = 'NO_SESSION'; err.status = 401;
+        throw err;
+      }
+      await context.addCookies(cookies);
     }
-
-    await context.addCookies(cookies);
     page = await context.newPage();
 
     await page.goto(profileUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
@@ -66,6 +67,8 @@ async function sendConnectionRequest({ accountId, profileUrl, note, proxyUrl }) 
     }
 
     await humanClick(page, 'button[aria-label*="Send invitation"], button[aria-label*="Send now"]');
+    // W2 — Burn quota only after the click that actually sends the invitation.
+    await checkAndIncrement(accountId, 'connectRequests');
     await delay(1500, 3000);
 
     await saveCookies(accountId, await context.cookies());

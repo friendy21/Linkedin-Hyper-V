@@ -8,18 +8,20 @@ const { checkAndIncrement }        = require('../rateLimit');
 async function searchPeople({ accountId, query, proxyUrl, limit = 10 }) {
   await checkAndIncrement(accountId, 'searchQueries'); // FIRST
 
-  const { context } = await getAccountContext(accountId, proxyUrl);
+  const { context, cookiesLoaded } = await getAccountContext(accountId, proxyUrl);
   let page;
 
   try {
-    const cookies = await loadCookies(accountId);
-    if (!cookies) {
-      const err = new Error(`No session for account ${accountId}`);
-      err.code = 'NO_SESSION'; err.status = 401;
-      throw err;
+    // W1 — Only inject cookies on a cache miss.
+    if (!cookiesLoaded) {
+      const cookies = await loadCookies(accountId);
+      if (!cookies) {
+        const err = new Error(`No session for account ${accountId}`);
+        err.code = 'NO_SESSION'; err.status = 401;
+        throw err;
+      }
+      await context.addCookies(cookies);
     }
-
-    await context.addCookies(cookies);
     page = await context.newPage();
 
     const searchUrl = `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(query)}&origin=GLOBAL_SEARCH_HEADER`;

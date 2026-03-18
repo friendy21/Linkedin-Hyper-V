@@ -8,18 +8,20 @@ const { checkAndIncrement }        = require('../rateLimit');
 async function readMessages({ accountId, proxyUrl, limit = 20 }) {
   await checkAndIncrement(accountId, 'inboxReads'); // FIRST — before any browser work
 
-  const { context } = await getAccountContext(accountId, proxyUrl);
+  const { context, cookiesLoaded } = await getAccountContext(accountId, proxyUrl);
   let page;
 
   try {
-    const cookies = await loadCookies(accountId);
-    if (!cookies) {
-      const err = new Error(`No session for account ${accountId}`);
-      err.code = 'NO_SESSION'; err.status = 401;
-      throw err;
+    // W1 — Only load + inject cookies on a cache miss.
+    if (!cookiesLoaded) {
+      const cookies = await loadCookies(accountId);
+      if (!cookies) {
+        const err = new Error(`No session for account ${accountId}`);
+        err.code = 'NO_SESSION'; err.status = 401;
+        throw err;
+      }
+      await context.addCookies(cookies);
     }
-
-    await context.addCookies(cookies);
     page = await context.newPage();
 
     await page.goto('https://www.linkedin.com/messaging/', {
@@ -27,13 +29,18 @@ async function readMessages({ accountId, proxyUrl, limit = 20 }) {
       timeout:   30000,
     });
 
-    await delay(2000, 4000);
+    // Wait for the actual thread list instead of sleeping blindly.
+    // Falls back gracefully if the selector never appears (e.g. empty inbox).
+    await page.waitForSelector(
+      '.msg-conversation-listitem, [data-view-name="messaging-thread-list-item"]',
+      { timeout: 15000 }
+    ).catch(() => null);
 
-    await page.waitForSelector('[data-view-name="messaging-threads"]', { timeout: 15000 })
-      .catch(() => null);
+    // Small human-like jitter only — the content is already there
+    await delay(300, 600);
 
     await humanScroll(page, 300);
-    await delay(1000, 2000);
+    await delay(300, 600);
 
     const chats = await page.evaluate((maxItems) => {
       const items   = [];

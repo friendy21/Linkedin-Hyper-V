@@ -1,5 +1,6 @@
 'use client';
 
+import { memo } from 'react';
 import type { Conversation, Account } from '@/types/dashboard';
 import { Avatar } from '@/components/ui/Avatar';
 import { UnreadBadge } from '@/components/ui/UnreadBadge';
@@ -15,7 +16,8 @@ interface ConversationListProps {
   onSelect: (conv: Conversation) => void;
 }
 
-export function ConversationList({
+// F3 — React.memo prevents re-renders when conversations/accounts/selected haven't changed.
+export const ConversationList = memo(function ConversationList({
   conversations,
   accounts,
   selected,
@@ -97,24 +99,18 @@ export function ConversationList({
         ) : (
           conversations.map((conv) => {
             const isSelected = conv.conversationId === selected?.conversationId;
+            // F4 — compute timeAgo once per item, not inline on every render pass
+            const timeStr = timeAgo(conv.lastMessage.sentAt);
             return (
               <div
                 key={conv.conversationId}
                 onClick={() => onSelect(conv)}
-                className="flex items-start gap-3 px-4 py-3 cursor-pointer transition-colors"
+                // F2 — CSS hover via Tailwind pseudo-class; no JS style mutation = no layout thrash
+                className="flex items-start gap-3 px-4 py-3 cursor-pointer transition-colors hover:bg-[rgba(34,34,46,0.5)]"
                 style={{
-                  background:  isSelected ? 'var(--bg-hover)' : 'transparent',
+                  background:   isSelected ? 'var(--bg-hover)' : 'transparent',
                   borderBottom: '1px solid var(--border)',
-                  borderLeft:  isSelected ? '2px solid var(--accent)' : '2px solid transparent',
-                }}
-                onMouseEnter={(e) => {
-                  if (!isSelected)
-                    (e.currentTarget as HTMLDivElement).style.background =
-                      'rgba(34,34,46,0.5)';
-                }}
-                onMouseLeave={(e) => {
-                  if (!isSelected)
-                    (e.currentTarget as HTMLDivElement).style.background = 'transparent';
+                  borderLeft:   isSelected ? '2px solid var(--accent)' : '2px solid transparent',
                 }}
               >
                 <Avatar name={conv.participant.name} size="sm" />
@@ -131,7 +127,7 @@ export function ConversationList({
                     </div>
                     <div className="flex items-center gap-1.5 flex-shrink-0">
                       <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
-                        {timeAgo(conv.lastMessage.sentAt)}
+                        {timeStr}
                       </span>
                       {conv.unreadCount > 0 && <UnreadBadge count={conv.unreadCount} />}
                     </div>
@@ -148,4 +144,4 @@ export function ConversationList({
       </div>
     </div>
   );
-}
+});

@@ -16,15 +16,21 @@ export default function InboxPage() {
   const [loading,       setLoading]       = useState(true);
   const [error,         setError]         = useState<string | null>(null);
 
-  const load = useCallback(async () => {
+  // B2 — Accounts are stable; fetch once on mount (5-min ISR cache in api-client).
+  const loadAccounts = useCallback(async () => {
     try {
-      // Fetch in parallel — inbox + accounts
-      const [inboxData, accountsData] = await Promise.all([
-        getUnifiedInbox(),
-        getAccounts(),
-      ]);
+      const { accounts: accs } = await getAccounts();
+      setAccounts(accs);
+    } catch {
+      // non-fatal — account list stays empty, filter pills just won't show
+    }
+  }, []);
+
+  // B2 — Inbox is real-time; poll separately on its own interval.
+  const loadInbox = useCallback(async () => {
+    try {
+      const inboxData = await getUnifiedInbox();
       setConversations(inboxData.conversations);
-      setAccounts(accountsData.accounts);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load inbox');
@@ -34,11 +40,15 @@ export default function InboxPage() {
   }, []);
 
   useEffect(() => {
-    void load();
-    // Silent background refresh every 120s — does NOT reset loading state
-    const interval = setInterval(() => void load(), 120_000);
+    void loadAccounts(); // once on mount
+  }, [loadAccounts]);
+
+  useEffect(() => {
+    void loadInbox();
+    // Silent background refresh every 120 s — does NOT reset loading state
+    const interval = setInterval(() => void loadInbox(), 120_000);
     return () => clearInterval(interval);
-  }, [load]);
+  }, [loadInbox]);
 
   const filtered =
     filter === 'all'
@@ -67,7 +77,7 @@ export default function InboxPage() {
   }
 
   if (error) {
-    return <ErrorState message={error} onRetry={load} />;
+    return <ErrorState message={error} onRetry={loadInbox} />;
   }
 
   return (

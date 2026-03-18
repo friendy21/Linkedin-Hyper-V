@@ -7,20 +7,24 @@ const { checkAndIncrement }            = require('../rateLimit');
 const { getRedis }                     = require('../redisClient');
 
 async function sendMessage({ accountId, chatId, text, proxyUrl }) {
-  await checkAndIncrement(accountId, 'messagesSent'); // FIRST
-
-  const { context } = await getAccountContext(accountId, proxyUrl);
+  // W2 — checkAndIncrement moved to AFTER successful send; quota isn't burned
+  // if the browser crashes, a selector fails, or LinkedIn rejects the message.
+  const { context, cookiesLoaded } = await getAccountContext(accountId, proxyUrl);
   let page;
 
   try {
-    const cookies = await loadCookies(accountId);
-    if (!cookies) {
-      const err = new Error(`No session for account ${accountId}`);
-      err.code = 'NO_SESSION'; err.status = 401;
-      throw err;
+    // W1 — Only load + inject cookies on a cache miss (new browser context).
+    // On cache hits the context already has up-to-date cookies from the previous
+    // job's saveCookies() call — skips a Redis GET + Playwright IPC round-trip.
+    if (!cookiesLoaded) {
+      const cookies = await loadCookies(accountId);
+      if (!cookies) {
+        const err = new Error(`No session for account ${accountId}`);
+        err.code = 'NO_SESSION'; err.status = 401;
+        throw err;
+      }
+      await context.addCookies(cookies);
     }
-
-    await context.addCookies(cookies);
     page = await context.newPage();
 
     await page.goto(`https://www.linkedin.com/messaging/thread/${chatId}/`, {
@@ -30,10 +34,17 @@ async function sendMessage({ accountId, chatId, text, proxyUrl }) {
 
     await delay(2000, 4000);
 
+    await page.waitForSelector(
+      '.msg-form__contenteditable, [data-view-name="messaging-compose-box"] [contenteditable]',
+      { timeout: 10000 }
+    ).catch(() => null);
+
     await humanType(page, '.msg-form__contenteditable, [data-view-name="messaging-compose-box"] [contenteditable]', text);
     await delay(800, 1800);
 
     await humanClick(page, '.msg-form__send-button, button[type="submit"][aria-label*="Send"]');
+    // W2 — Increment AFTER the click that commits the send.
+    await checkAndIncrement(accountId, 'messagesSent');
     await delay(1500, 3000);
 
     await saveCookies(accountId, await context.cookies());

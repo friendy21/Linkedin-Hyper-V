@@ -111,14 +111,9 @@ export function ConnectionGrid({
               {connections.map((conn, idx) => (
                 <tr
                   key={`${conn.accountId}-${conn.profileUrl}-${idx}`}
+                  // F2 — CSS hover instead of direct style mutation (no layout thrash)
+                  className="hover:bg-[var(--bg-hover)] transition-colors"
                   style={{ borderBottom: '1px solid var(--border)' }}
-                  onMouseEnter={(e) =>
-                    ((e.currentTarget as HTMLTableRowElement).style.background =
-                      'var(--bg-hover)')
-                  }
-                  onMouseLeave={(e) =>
-                    ((e.currentTarget as HTMLTableRowElement).style.background = 'transparent')
-                  }
                 >
                   <td className="px-6 py-3">
                     <div className="flex items-center gap-3">
