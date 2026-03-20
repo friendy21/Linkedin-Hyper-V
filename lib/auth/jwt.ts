@@ -1,7 +1,11 @@
 // FILE: lib/auth/jwt.ts
 import { SignJWT, jwtVerify } from 'jose';
 
-const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET || '');
+function getSecret(): Uint8Array {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) throw new Error('JWT_SECRET environment variable is not set');
+  return new TextEncoder().encode(secret);
+}
 const SESSION_MAX_AGE = parseInt(process.env.SESSION_MAX_AGE || '86400', 10);
 
 export interface JWTPayload {
@@ -24,7 +28,7 @@ export async function signToken(): Promise<string> {
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
     .setExpirationTime(`${SESSION_MAX_AGE}s`)
-    .sign(JWT_SECRET);
+    .sign(getSecret());
 }
 
 /**
@@ -32,7 +36,7 @@ export async function signToken(): Promise<string> {
  */
 export async function verifyToken(token: string): Promise<JWTPayload | null> {
   try {
-    const { payload } = await jwtVerify(token, JWT_SECRET);
+    const { payload } = await jwtVerify(token, getSecret());
     return payload as unknown as JWTPayload;
   } catch {
     return null;
