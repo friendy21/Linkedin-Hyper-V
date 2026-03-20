@@ -8,7 +8,6 @@ import { MessageThread } from '@/components/inbox/MessageThread';
 import { Spinner } from '@/components/ui/Spinner';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { wsClient } from '@/lib/websocket-client';
-import { getTimeWindowLabel } from '@/lib/time-utils';
 import { ExportButton } from '@/components/ui/ExportButton';
 
 export default function InboxPage() {
@@ -118,21 +117,12 @@ export default function InboxPage() {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Header with time filter badge and live indicator */}
+      {/* Header with live indicator */}
       <div className="flex items-center justify-between px-6 py-3 border-b" style={{ borderColor: 'var(--border-color)' }}>
         <div className="flex items-center gap-3">
           <h1 className="text-xl font-semibold" style={{ color: 'var(--text-primary)' }}>
             Inbox
           </h1>
-          <span 
-            className="px-2 py-1 text-xs rounded-full" 
-            style={{ 
-              backgroundColor: 'var(--color-primary-100, #dbeafe)', 
-              color: 'var(--color-primary-700, #1d4ed8)' 
-            }}
-          >
-            {getTimeWindowLabel()}
-          </span>
         </div>
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">

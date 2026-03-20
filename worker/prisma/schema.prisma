@@ -1,0 +1,70 @@
+// Prisma schema for LinkedIn message persistence
+// Stores conversations and messages fetched from LinkedIn
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// LinkedIn Account model
+model Account {
+  id            String         @id
+  displayName   String
+  lastSyncedAt  DateTime?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  
+  conversations Conversation[]
+  messages      Message[]
+  
+  @@map("accounts")
+}
+
+// Conversation (Thread) model
+model Conversation {
+  id                     String    @id // LinkedIn thread ID
+  accountId              String
+  participantName        String
+  participantProfileUrl  String?
+  participantAvatarUrl   String?
+  lastMessageAt          DateTime
+  lastMessageText        String    @db.Text
+  lastMessageSentByMe    Boolean
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+  
+  account                Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  messages               Message[]
+  
+  @@index([accountId])
+  @@index([lastMessageAt(sort: Desc)])
+  @@index([accountId, lastMessageAt(sort: Desc)])
+  @@map("conversations")
+}
+
+// Message model
+model Message {
+  id                 String       @id @default(uuid())
+  conversationId     String
+  accountId          String
+  senderId           String       // LinkedIn user ID or "__self__"
+  senderName         String
+  text               String       @db.Text
+  sentAt             DateTime     @db.Timestamptz
+  isSentByMe         Boolean
+  linkedinMessageId  String?      // Original LinkedIn message ID if available
+  createdAt          DateTime     @default(now())
+  
+  conversation       Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  account            Account      @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  
+  // Composite unique constraint for deduplication
+  @@unique([conversationId, sentAt, text])
+  @@index([conversationId, sentAt])
+  @@index([accountId])
+  @@index([sentAt(sort: Desc)])
+  @@map("messages")
+}

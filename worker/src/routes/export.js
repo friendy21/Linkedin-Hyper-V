@@ -5,8 +5,7 @@
 
 const express = require('express');
 const { getRedis } = require('../redisClient');
-const { readMessages } = require('../actions/readMessages');
-const { readThread } = require('../actions/readThread');
+const messageRepo = require('../db/repositories/MessageRepository');
 
 const router = express.Router();
 
@@ -32,80 +31,35 @@ function toCSV(headers, rows) {
 
 /**
  * POST /export/messages
- * Export messages as CSV or JSON
- * Body: { accountId?, format: 'csv'|'json', chatId? }
+ * Export messages from database as CSV or JSON
+ * Body: { accountId?, format: 'csv'|'json', conversationId? }
  */
 router.post('/messages', async (req, res) => {
   try {
-    const { accountId, format = 'csv', chatId } = req.body;
+    const { accountId, format = 'csv', conversationId } = req.body;
     
     if (!format || !['csv', 'json'].includes(format)) {
       return res.status(400).json({ error: 'format must be "csv" or "json"' });
     }
 
-    const proxyUrl = process.env.PROXY_URL || null;
-    let allMessages = [];
-    let accountIds = [];
+    // Query messages from database
+    const messages = await messageRepo.getMessagesForExport({
+      accountId,
+      conversationId,
+    });
 
-    // Determine which accounts to export
-    if (accountId) {
-      accountIds = [accountId];
-    } else {
-      // Export all accounts
-      accountIds = (process.env.ACCOUNT_IDS ?? '').split(',').filter(Boolean);
-    }
-
-    // If specific chatId provided, export only that thread
-    if (chatId && accountId) {
-      const threadData = await readThread({ accountId, chatId, proxyUrl });
-      allMessages = threadData.items.map(msg => ({
-        timestamp: new Date(msg.createdAt).getTime(),
-        date: new Date(msg.createdAt).toLocaleDateString(),
-        time: new Date(msg.createdAt).toLocaleTimeString(),
-        accountId,
-        conversationId: chatId,
-        sender: msg.senderName,
-        message: msg.text,
-        isSentByMe: msg.senderId === '__self__',
-      }));
-    } else {
-      // Export all conversations for account(s)
-      for (const accId of accountIds) {
-        try {
-          // Get conversations
-          const inboxData = await readMessages({ accountId: accId, proxyUrl });
-          
-          // For each conversation, get full thread
-          for (const conv of inboxData.items) {
-            try {
-              const threadData = await readThread({ 
-                accountId: accId, 
-                chatId: conv.id, 
-                proxyUrl 
-              });
-              
-              const messages = threadData.items.map(msg => ({
-                timestamp: new Date(msg.createdAt).getTime(),
-                date: new Date(msg.createdAt).toLocaleDateString(),
-                time: new Date(msg.createdAt).toLocaleTimeString(),
-                accountId: accId,
-                conversationId: conv.id,
-                participantName: conv.participants[0]?.name || 'Unknown',
-                sender: msg.senderName,
-                message: msg.text,
-                isSentByMe: msg.senderId === '__self__',
-              }));
-              
-              allMessages.push(...messages);
-            } catch (err) {
-              console.error(`[Export] Failed to fetch thread ${conv.id}:`, err.message);
-            }
-          }
-        } catch (err) {
-          console.error(`[Export] Failed to fetch messages for ${accId}:`, err.message);
-        }
-      }
-    }
+    // Transform to export format
+    const allMessages = messages.map(msg => ({
+      timestamp: new Date(msg.sentAt).getTime(),
+      date: new Date(msg.sentAt).toLocaleDateString(),
+      time: new Date(msg.sentAt).toLocaleTimeString(),
+      accountId: msg.accountId,
+      conversationId: msg.conversationId,
+      participantName: msg.conversation?.participantName || 'Unknown',
+      sender: msg.senderName,
+      message: msg.text,
+      isSentByMe: msg.isSentByMe,
+    }));
 
     // Sort by timestamp
     allMessages.sort((a, b) => a.timestamp - b.timestamp);

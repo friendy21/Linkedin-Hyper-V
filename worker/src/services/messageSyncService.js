@@ -1,0 +1,258 @@
+// FILE: worker/src/services/messageSyncService.js
+// Message synchronization service - fetches from LinkedIn and stores in database
+
+'use strict';
+
+const { readMessages } = require('../actions/readMessages');
+const { readThread } = require('../actions/readThread');
+const accountRepo = require('../db/repositories/AccountRepository');
+const messageRepo = require('../db/repositories/MessageRepository');
+const { emitInboxUpdate, emitNewMessage } = require('../utils/websocket');
+const { getRedis } = require('../redisClient');
+
+/**
+ * Sync messages for a single account
+ * @param {string} accountId - Account ID to sync
+ * @param {string|null} proxyUrl - Proxy URL if configured
+ * @returns {Promise<Object>} Sync stats
+ */
+async function syncAccount(accountId, proxyUrl = null) {
+  console.log(`[MessageSync] Starting sync for account: ${accountId}`);
+  
+  const stats = {
+    accountId,
+    conversationsProcessed: 0,
+    newMessages: 0,
+    updatedConversations: 0,
+    errors: [],
+    startedAt: new Date(),
+  };
+
+  try {
+    // Ensure account exists in database
+    await accountRepo.upsertAccount(accountId, accountId);
+
+    // Fetch conversations from LinkedIn
+    console.log(`[MessageSync] Fetching conversations for ${accountId}...`);
+    const inboxData = await readMessages({ accountId, proxyUrl, limit: 50 });
+    
+    if (!inboxData || !inboxData.items || inboxData.items.length === 0) {
+      console.log(`[MessageSync] No conversations found for ${accountId}`);
+      return stats;
+    }
+
+    console.log(`[MessageSync] Found ${inboxData.items.length} conversations for ${accountId}`);
+
+    // Process each conversation
+    for (const conv of inboxData.items) {
+      try {
+        stats.conversationsProcessed++;
+
+        // Extract conversation data
+        const conversationId = conv.id;
+        const participantName = conv.participants[0]?.name || 'Unknown';
+        const participantProfileUrl = conv.participants[0]?.profileUrl || null;
+        const participantAvatarUrl = conv.participants[0]?.avatarUrl || null;
+
+        // Upsert conversation
+        await messageRepo.upsertConversation({
+          id: conversationId,
+          accountId,
+          participantName,
+          participantProfileUrl,
+          participantAvatarUrl,
+          lastMessageAt: new Date(conv.lastMessage?.createdAt || conv.createdAt || Date.now()),
+          lastMessageText: conv.lastMessage?.text || '',
+          lastMessageSentByMe: conv.lastMessage?.senderId === '__self__',
+        });
+        stats.updatedConversations++;
+
+        // Fetch thread messages
+        console.log(`[MessageSync] Fetching messages for conversation ${conversationId}...`);
+        const threadData = await readThread({ accountId, chatId: conversationId, proxyUrl, limit: 100 });
+
+        if (threadData && threadData.items && threadData.items.length > 0) {
+          // Get existing message count before sync
+          const existingCount = await messageRepo.countMessagesByConversation(conversationId);
+
+          // Upsert each message
+          let newMessagesInThread = 0;
+          for (const msg of threadData.items) {
+            try {
+              const result = await messageRepo.upsertMessage({
+                conversationId,
+                accountId,
+                senderId: msg.senderId || '__unknown__',
+                senderName: msg.senderName || 'Unknown',
+                text: msg.text || '',
+                sentAt: new Date(msg.createdAt || Date.now()),
+                isSentByMe: msg.senderId === '__self__',
+                linkedinMessageId: msg.id || null,
+              });
+
+              // If message was newly created (not a duplicate)
+              if (result) {
+                newMessagesInThread++;
+              }
+            } catch (msgError) {
+              console.error(`[MessageSync] Error upserting message in ${conversationId}:`, msgError.message);
+              stats.errors.push({
+                conversationId,
+                messageError: msgError.message,
+              });
+            }
+          }
+
+          stats.newMessages += newMessagesInThread;
+          
+          // Get new count after sync
+          const newCount = await messageRepo.countMessagesByConversation(conversationId);
+          const actualNew = newCount - existingCount;
+
+          if (actualNew > 0) {
+            console.log(`[MessageSync] Added ${actualNew} new messages to conversation ${conversationId}`);
+            
+            // Emit WebSocket event for new messages
+            emitNewMessage(accountId, {
+              conversationId,
+              participantName,
+              newMessagesCount: actualNew,
+            });
+          }
+        }
+
+        // Small delay to avoid rate limits
+        await delay(500, 1000);
+
+      } catch (convError) {
+        console.error(`[MessageSync] Error processing conversation ${conv.id}:`, convError.message);
+        stats.errors.push({
+          conversationId: conv.id,
+          error: convError.message,
+        });
+      }
+    }
+
+    // Update account's last synced timestamp
+    await accountRepo.updateLastSyncedAt(accountId);
+
+    // Emit WebSocket event for completed sync
+    emitInboxUpdate(accountId, {
+      conversationsCount: stats.conversationsProcessed,
+      newMessagesCount: stats.newMessages,
+      syncedAt: new Date().toISOString(),
+    });
+
+    stats.completedAt = new Date();
+    stats.durationMs = stats.completedAt - stats.startedAt;
+    
+    console.log(`[MessageSync] Completed sync for ${accountId}:`, {
+      conversations: stats.conversationsProcessed,
+      newMessages: stats.newMessages,
+      duration: `${stats.durationMs}ms`,
+      errors: stats.errors.length,
+    });
+
+    // Log to Redis activity log
+    const redis = getRedis();
+    await redis.lpush(
+      `activity:log:${accountId}`,
+      JSON.stringify({
+        type: 'sync',
+        accountId,
+        timestamp: Date.now(),
+        stats: {
+          conversations: stats.conversationsProcessed,
+          newMessages: stats.newMessages,
+          errors: stats.errors.length,
+        },
+      })
+    );
+    await redis.ltrim(`activity:log:${accountId}`, 0, 999); // Keep last 1000 entries
+
+    return stats;
+
+  } catch (error) {
+    console.error(`[MessageSync] Fatal error syncing account ${accountId}:`, error);
+    stats.errors.push({
+      fatal: true,
+      error: error.message,
+      stack: error.stack,
+    });
+    stats.completedAt = new Date();
+    return stats;
+  }
+}
+
+/**
+ * Sync messages for all configured accounts (staggered)
+ * @param {string|null} proxyUrl - Proxy URL if configured
+ * @returns {Promise<Object>} Aggregated sync stats
+ */
+async function syncAllAccounts(proxyUrl = null) {
+  console.log('[MessageSync] Starting sync for all accounts...');
+  
+  const accountIds = (process.env.ACCOUNT_IDS ?? '').split(',').filter(Boolean);
+  
+  if (accountIds.length === 0) {
+    console.warn('[MessageSync] No accounts configured in ACCOUNT_IDS');
+    return {
+      totalAccounts: 0,
+      results: [],
+    };
+  }
+
+  const results = [];
+  
+  // Sync accounts sequentially with staggered timing to respect rate limits
+  for (const accountId of accountIds) {
+    try {
+      const accountStats = await syncAccount(accountId, proxyUrl);
+      results.push(accountStats);
+      
+      // Stagger syncs: wait 2-3 minutes between accounts
+      if (accountIds.indexOf(accountId) < accountIds.length - 1) {
+        const staggerDelay = 120000 + Math.random() * 60000; // 2-3 minutes
+        console.log(`[MessageSync] Waiting ${Math.round(staggerDelay/1000)}s before next account...`);
+        await delay(staggerDelay);
+      }
+    } catch (error) {
+      console.error(`[MessageSync] Failed to sync account ${accountId}:`, error);
+      results.push({
+        accountId,
+        error: error.message,
+        errors: [{ fatal: true, error: error.message }],
+      });
+    }
+  }
+
+  const aggregated = {
+    totalAccounts: accountIds.length,
+    successfulAccounts: results.filter(r => !r.errors || r.errors.length === 0).length,
+    totalConversations: results.reduce((sum, r) => sum + (r.conversationsProcessed || 0), 0),
+    totalNewMessages: results.reduce((sum, r) => sum + (r.newMessages || 0), 0),
+    totalErrors: results.reduce((sum, r) => sum + (r.errors?.length || 0), 0),
+    results,
+    syncedAt: new Date().toISOString(),
+  };
+
+  console.log('[MessageSync] All accounts sync completed:', aggregated);
+  
+  return aggregated;
+}
+
+/**
+ * Delay helper function
+ * @param {number} minMs - Minimum delay in milliseconds
+ * @param {number} maxMs - Maximum delay in milliseconds (optional)
+ * @returns {Promise<void>}
+ */
+function delay(minMs, maxMs) {
+  const delayMs = maxMs ? minMs + Math.random() * (maxMs - minMs) : minMs;
+  return new Promise(resolve => setTimeout(resolve, delayMs));
+}
+
+module.exports = {
+  syncAccount,
+  syncAllAccounts,
+};

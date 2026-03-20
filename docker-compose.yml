@@ -1,6 +1,24 @@
 version: '3.8'
 
 services:
+  # PostgreSQL database for persistent message storage
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: linkedinuser
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: linkedin_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U linkedinuser -d linkedin_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # Internal only - not exposed to host
+    # Use for debugging: ports: - "5432:5432"
+
   redis:
     image: redis:alpine
     # FIXED: added requirepass — never run Redis without auth in production
@@ -36,8 +54,11 @@ services:
       - PROXY_URL=${PROXY_URL}
       - HTTP_PROXY=${PROXY_URL}
       - HTTPS_PROXY=${PROXY_URL}
+      - DATABASE_URL=postgresql://linkedinuser:${DB_PASSWORD}@postgres:5432/linkedin_db
     depends_on:
       redis:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     restart: always
     # A5 — Resource limits so a runaway Chrome can't OOM the host
@@ -76,3 +97,8 @@ services:
       worker:
         condition: service_healthy
     restart: always
+
+# Persistent volumes
+volumes:
+  postgres_data:
+    driver: local

@@ -62,9 +62,44 @@ app.use(requireApiKey);
 
 const { getRedis } = require('./redisClient');
 const exportRoutes = require('./routes/export');
+const { syncAccount, syncAllAccounts } = require('./services/messageSyncService');
 
 // Mount export routes
 app.use('/export', exportRoutes);
+
+// POST /sync/messages - Manual message sync trigger
+app.post('/sync/messages', async (req, res) => {
+  try {
+    const { accountId } = req.body;
+    const proxyUrl = process.env.PROXY_URL || null;
+
+    console.log('[API] Manual sync triggered', accountId ? `for account ${accountId}` : 'for all accounts');
+
+    // Trigger sync in background (don't wait for completion)
+    if (accountId) {
+      syncAccount(accountId, proxyUrl)
+        .then(stats => console.log('[API] Manual sync completed:', stats))
+        .catch(err => console.error('[API] Manual sync failed:', err));
+      
+      res.json({ 
+        success: true, 
+        message: `Sync started for account ${accountId}`,
+        accountId,
+      });
+    } else {
+      syncAllAccounts(proxyUrl)
+        .then(stats => console.log('[API] Manual sync completed:', stats))
+        .catch(err => console.error('[API] Manual sync failed:', err));
+      
+      res.json({ 
+        success: true, 
+        message: 'Sync started for all accounts',
+      });
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // GET /accounts
 app.get('/accounts', async (_req, res) => {
@@ -208,14 +243,31 @@ app.get('/messages/inbox', async (req, res) => {
   }
 });
 
+// GET /messages/thread — Query thread messages from database
 app.get('/messages/thread', async (req, res) => {
   try {
+    const messageRepo = require('./db/repositories/MessageRepository');
     const accountId = validateId(req.query.accountId, { field: 'accountId' });
     const chatId    = validateId(req.query.chatId,    { field: 'chatId' });
-    const limit     = parseLimit(req.query.limit, 50);
-    const result    = await runJob('readThread', {
-      accountId, chatId, limit, proxyUrl: process.env.PROXY_URL || null,
-    });
+    const limit     = parseLimit(req.query.limit, 100);
+    const offset    = parseInt(req.query.offset) || 0;
+
+    // Query messages from database
+    const messages = await messageRepo.getMessagesByConversation(chatId, limit, offset);
+
+    // Transform to match expected frontend format
+    const result = {
+      items: messages.map(msg => ({
+        id: msg.id,
+        text: msg.text,
+        sentAt: new Date(msg.sentAt).getTime(),
+        sentByMe: msg.isSentByMe,
+        senderName: msg.senderName,
+      })),
+      cursor: null,
+      hasMore: messages.length === limit, // If we got a full page, there might be more
+    };
+
     res.json(result);
   } catch (err) {
     const status = err.status || (err.message ? 400 : 500);
@@ -285,64 +337,38 @@ app.post('/connections/send', async (req, res) => {
   }
 });
 
-// GET /inbox/unified — triggers parallel inbox reads for all active accounts
+// GET /inbox/unified — Query conversations from database (all accounts)
 app.get('/inbox/unified', async (req, res) => {
   try {
-    const redis     = getRedis();
-    const cacheKey  = 'cache:unified-inbox';
+    const messageRepo = require('./db/repositories/MessageRepository');
+    const limit = parseInt(req.query.limit) || 100;
+    const offset = parseInt(req.query.offset) || 0;
 
-    // ── Serve from cache if available (TTL 90 s) ──────────────────────────────
-    const cached = await redis.get(cacheKey);
-    if (cached) {
-      res.setHeader('X-Cache', 'HIT');
-      return res.json(JSON.parse(cached));
-    }
+    // Query all conversations from database
+    const conversations = await messageRepo.getAllConversations(limit, offset);
 
-    const ids = (process.env.ACCOUNT_IDS ?? '').split(',').map(s => s.trim()).filter(Boolean);
+    // Transform to match expected frontend format
+    const payload = {
+      conversations: conversations.map(conv => ({
+        conversationId: conv.id,
+        accountId: conv.accountId,
+        participant: {
+          name: conv.participantName,
+          profileUrl: conv.participantProfileUrl || '',
+        },
+        lastMessage: {
+          text: conv.lastMessageText,
+          sentAt: new Date(conv.lastMessageAt).getTime(),
+          sentByMe: conv.lastMessageSentByMe,
+        },
+        unreadCount: 0, // We don't track unread in database yet
+        messages: [],
+      })),
+    };
 
-    const results = await Promise.allSettled(
-      ids.map(async (accountId) => {
-        const metaRaw = await redis.get(`session:meta:${accountId}`);
-        if (!metaRaw) return []; // skip accounts with no active session
-
-        const result = await runJob('readMessages', {
-          accountId, limit: 20, proxyUrl: process.env.PROXY_URL || null,
-        });
-
-        const items = result?.items ?? [];
-        return items.map((chat) => ({
-          conversationId: chat.id,
-          accountId,
-          participant: {
-            name:       chat.participants?.[0]?.name       ?? 'Unknown',
-            profileUrl: chat.participants?.[0]?.profileUrl ?? '',
-          },
-          lastMessage: {
-            text:     chat.lastMessage?.text ?? '',
-            sentAt:   chat.lastMessage?.createdAt
-              ? new Date(chat.lastMessage.createdAt).getTime()
-              : Date.now(),
-            sentByMe: chat.lastMessage?.senderId === '__self__',
-          },
-          unreadCount: chat.unreadCount ?? 0,
-          messages: [],
-        }));
-      })
-    );
-
-    const all = results
-      .filter(r => r.status === 'fulfilled')
-      .flatMap(r => r.value)
-      .sort((a, b) => (b.lastMessage?.sentAt ?? 0) - (a.lastMessage?.sentAt ?? 0));
-
-    const payload = { conversations: all };
-
-    // ── Store result in cache (90 s TTL) ──────────────────────────────────────
-    await redis.set(cacheKey, JSON.stringify(payload), 'EX', 90);
-
-    res.setHeader('X-Cache', 'MISS');
     res.json(payload);
   } catch (err) {
+    console.error('[API] Error fetching unified inbox:', err);
     res.status(500).json({ error: process.env.NODE_ENV === 'production' ? 'Internal error' : err.message });
   }
 });
