@@ -1,0 +1,148 @@
+// Prisma schema for LinkedIn Hyper-V — multi-tenant
+// User login (NextAuth) is separate from LinkedIn account connection
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── App user (NextAuth email/password) ───────────────────────────────────────
+
+model User {
+  id             String           @id @default(uuid())
+  email          String           @unique
+  passwordHash   String
+  role           String           @default("user")
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  linkedInAccounts LinkedInAccount[]
+
+  @@map("users")
+}
+
+// ── Status enum for LinkedIn account sessions ────────────────────────────────
+
+enum LinkedInAccountStatus {
+  pending
+  active
+  expired
+}
+
+// ── LinkedIn account (connected by a User, holds encrypted storageState) ─────
+
+model LinkedInAccount {
+  id                     String                @id @default(uuid())
+  userId                 String
+  linkedinProfileId      String?
+  displayName            String                @default("")
+  encryptedStorageState  String?               @db.Text
+  sessionExpiresAt       DateTime?
+  status                 LinkedInAccountStatus @default(pending)
+  lastSyncedAt           DateTime?
+  createdAt              DateTime              @default(now())
+  updatedAt              DateTime              @updatedAt
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversations Conversation[]
+  messages      Message[]
+  connections   Connection[]
+  notifications Notification[]
+
+  @@index([userId])
+  @@index([status])
+  @@map("linkedin_accounts")
+}
+
+// ── Conversation (Thread) ────────────────────────────────────────────────────
+
+model Conversation {
+  id                     String   @id // LinkedIn thread ID
+  linkedInAccountId      String
+  participantName        String
+  participantProfileUrl  String?
+  participantAvatarUrl   String?
+  lastMessageAt          DateTime
+  lastMessageText        String   @db.Text
+  lastMessageSentByMe    Boolean
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  linkedInAccount LinkedInAccount @relation(fields: [linkedInAccountId], references: [id], onDelete: Cascade)
+  messages        Message[]
+
+  @@index([linkedInAccountId])
+  @@index([lastMessageAt(sort: Desc)])
+  @@index([linkedInAccountId, lastMessageAt(sort: Desc)])
+  @@map("conversations")
+}
+
+// ── Message ──────────────────────────────────────────────────────────────────
+
+model Message {
+  id                String   @id @default(uuid())
+  conversationId    String
+  linkedInAccountId String
+  senderId          String   // LinkedIn user ID or "__self__"
+  senderName        String
+  text              String   @db.Text
+  sentAt            DateTime @db.Timestamptz
+  isSentByMe        Boolean
+  linkedinMessageId String?  // Original LinkedIn message ID if available
+  createdAt         DateTime @default(now())
+
+  conversation    Conversation    @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  linkedInAccount LinkedInAccount @relation(fields: [linkedInAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, sentAt, text])
+  @@index([conversationId, sentAt])
+  @@index([linkedInAccountId])
+  @@index([sentAt(sort: Desc)])
+  @@map("messages")
+}
+
+// ── Connection (scraped LinkedIn connections) ─────────────────────────────────
+
+model Connection {
+  id                      String   @id @default(uuid())
+  linkedInAccountId       String
+  linkedinProfileId       String
+  name                    String
+  profileUrl              String?
+  headline                String?
+  connectionCountSnapshot Int?     // total connections count at time of snapshot
+  snapshotHash            String?  // hash of connection list for delta detection
+  connectedAt             DateTime?
+  createdAt               DateTime @default(now())
+
+  linkedInAccount LinkedInAccount @relation(fields: [linkedInAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([linkedInAccountId, linkedinProfileId])
+  @@index([linkedInAccountId])
+  @@map("connections")
+}
+
+// ── Notification (scraped from LinkedIn notifications page) ──────────────────
+
+model Notification {
+  id                    String    @id @default(uuid())
+  linkedInAccountId     String
+  linkedinNotificationId String   @unique // LinkedIn's own notification ID for dedup
+  type                  String    // "connection_request", "message", "like", etc.
+  title                 String
+  body                  String?   @db.Text
+  linkedinUrl           String?
+  readAt                DateTime?
+  receivedAt            DateTime
+  createdAt             DateTime  @default(now())
+
+  linkedInAccount LinkedInAccount @relation(fields: [linkedInAccountId], references: [id], onDelete: Cascade)
+
+  @@index([linkedInAccountId])
+  @@index([linkedInAccountId, receivedAt(sort: Desc)])
+  @@map("notifications")
+}
