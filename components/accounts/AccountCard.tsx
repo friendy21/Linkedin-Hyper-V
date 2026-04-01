@@ -6,8 +6,22 @@
 
 import { useState } from 'react';
 import { RateLimitBar } from '../dashboard/RateLimitBar';
-import { Loader2, RefreshCw, Trash2, Linkedin, AlertTriangle, CheckCircle2, Clock } from 'lucide-react';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { Toast } from '@/components/ui/Toast';
+import { 
+  Loader2, 
+  RefreshCw, 
+  Trash2, 
+  Linkedin, 
+  AlertTriangle, 
+  CheckCircle2, 
+  Clock,
+  BarChart2,
+  Copy,
+  Check
+} from 'lucide-react';
 import toast from 'react-hot-toast';
+import { motion, AnimatePresence } from 'framer-motion';
 
 interface LinkedInAccount {
   id: string;
@@ -35,9 +49,9 @@ function StatusBadge({ status }: { status: LinkedInAccount['status'] }) {
     return (
       <span
         className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium"
-        style={{ background: 'rgba(34,197,94,0.12)', color: '#22c55e' }}
+        style={{ background: 'var(--color-success-bg)', color: 'var(--color-success)' }}
       >
-        <CheckCircle2 size={11} />
+        <span className="w-2 h-2 rounded-full bg-[var(--color-success)] status-dot-active" />
         Active
       </span>
     );
@@ -47,9 +61,9 @@ function StatusBadge({ status }: { status: LinkedInAccount['status'] }) {
     return (
       <span
         className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium"
-        style={{ background: 'rgba(239,68,68,0.12)', color: '#ef4444' }}
+        style={{ background: 'var(--color-danger-bg)', color: 'var(--color-danger)' }}
       >
-        <AlertTriangle size={11} />
+        <span className="w-2 h-2 rounded-full bg-[var(--color-danger)]" />
         Expired
       </span>
     );
@@ -58,7 +72,7 @@ function StatusBadge({ status }: { status: LinkedInAccount['status'] }) {
   return (
     <span
       className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium"
-      style={{ background: 'rgba(234,179,8,0.12)', color: '#eab308' }}
+      style={{ background: 'var(--color-warning-bg)', color: 'var(--color-warning)' }}
     >
       <Clock size={11} />
       Pending
@@ -76,44 +90,76 @@ function relativeTime(iso: string) {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
+function formatExpiryCountdown(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const expiry = new Date(iso).getTime();
+  const now = Date.now();
+  const diff = expiry - now;
+  
+  if (diff <= 0) return 'Expired';
+  
+  const days = Math.floor(diff / (24 * 60 * 60 * 1000));
+  const hours = Math.floor((diff % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000));
+  
+  if (days > 0) {
+    return `Session expires in ${days}d ${hours}h`;
+  }
+  return `Session expires in ${hours}h`;
+}
+
 export function AccountCard({ account, onRefresh }: Props) {
   const [isReconnecting, setIsReconnecting] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [rateLimits, setRateLimits] = useState<RateLimits | null>(null);
   const [limitsLoading, setLimitsLoading] = useState(false);
+  const [showReconnectDialog, setShowReconnectDialog] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const handleReconnect = async () => {
-    if (!confirm('This will open a new LinkedIn login window. Continue?')) return;
+    setShowReconnectDialog(false);
     setIsReconnecting(true);
     try {
       const res = await fetch(`/api/linkedin-accounts/${account.id}/reconnect`, { method: 'POST' });
       if (res.ok) {
-        toast.success('Account reconnected successfully!');
+        toast.custom((t) => (
+          <Toast type="success" title="Account reconnected" description="Sync will resume shortly" visible={t.visible} />
+        ));
         onRefresh();
       } else {
         const data = await res.json();
-        toast.error(data.error || 'Reconnect failed');
+        toast.custom((t) => (
+          <Toast type="error" title="Reconnect failed" description={data.error || 'Unknown error'} visible={t.visible} />
+        ));
       }
     } catch {
-      toast.error('Network error during reconnect');
+      toast.custom((t) => (
+        <Toast type="error" title="Network error" description="Failed to reconnect account" visible={t.visible} />
+      ));
     } finally {
       setIsReconnecting(false);
     }
   };
 
   const handleDelete = async () => {
-    if (!confirm(`Remove LinkedIn account "${account.displayName || account.id}"? This cannot be undone.`)) return;
+    setShowDeleteDialog(false);
     setIsDeleting(true);
     try {
       const res = await fetch(`/api/linkedin-accounts/${account.id}`, { method: 'DELETE' });
       if (res.ok) {
-        toast.success('Account removed.');
+        toast.custom((t) => (
+          <Toast type="success" title="Account removed" description="The account was successfully removed." visible={t.visible} />
+        ));
         onRefresh();
       } else {
-        toast.error('Failed to remove account');
+        toast.custom((t) => (
+          <Toast type="error" title="Removal failed" description="Failed to remove account from system." visible={t.visible} />
+        ));
       }
     } catch {
-      toast.error('Network error during removal');
+      toast.custom((t) => (
+        <Toast type="error" title="Network error" description="Failed to remove account." visible={t.visible} />
+      ));
     } finally {
       setIsDeleting(false);
     }
@@ -129,121 +175,201 @@ export function AccountCard({ account, onRefresh }: Props) {
     }
   };
 
+  const copyProfileUrl = () => {
+    if (!account.linkedinProfileId) return;
+    const url = `https://linkedin.com/in/${account.linkedinProfileId}`;
+    navigator.clipboard.writeText(url);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+    toast.custom((t) => (
+      <Toast type="success" title="URL copied" description="Profile URL copied to clipboard!" visible={t.visible} />
+    ));
+  };
+
   const initials = (account.displayName || account.id).substring(0, 2).toUpperCase();
+  const expiryText = formatExpiryCountdown(account.sessionExpiresAt);
 
   return (
-    <div
-      className="rounded-xl border p-5 space-y-4"
-      style={{ background: 'var(--bg-panel)', borderColor: 'var(--border)' }}
-    >
-      {/* Header */}
-      <div className="flex items-start gap-3">
-        <div
-          className="w-11 h-11 rounded-xl flex items-center justify-center text-sm font-bold shrink-0"
-          style={{ background: 'linear-gradient(135deg, #0A66C2 0%, #004182 100%)', color: 'white' }}
-        >
-          {initials}
-        </div>
-
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <h3 className="font-semibold truncate" style={{ color: 'var(--text-primary)' }}>
-              {account.displayName || account.linkedinProfileId || 'LinkedIn Account'}
-            </h3>
-            <StatusBadge status={account.status} />
+    <>
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="rounded-xl border p-5 space-y-4 hover:border-[var(--brand-blue)]/30 transition-all"
+        style={{ background: 'var(--bg-panel)', borderColor: 'var(--border)' }}
+      >
+        {/* Header */}
+        <div className="flex items-start gap-3">
+          <div
+            className="w-11 h-11 rounded-xl flex items-center justify-center text-sm font-bold shrink-0"
+            style={{ background: 'linear-gradient(135deg, var(--color-linkedin) 0%, var(--color-linkedin-dark) 100%)', color: 'white' }}
+          >
+            {initials}
           </div>
 
-          {account.linkedinProfileId && (
-            <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
-              @{account.linkedinProfileId}
-            </p>
-          )}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3 
+                className="font-semibold truncate" 
+                style={{ color: 'var(--text-primary)' }}
+                title={account.displayName}
+              >
+                {account.displayName || account.linkedinProfileId || 'LinkedIn Account'}
+              </h3>
+              <StatusBadge status={account.status} />
+            </div>
 
-          {account.lastSyncedAt && (
-            <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
-              Last synced {relativeTime(account.lastSyncedAt)}
-            </p>
-          )}
-        </div>
+            {account.linkedinProfileId && (
+              <div className="flex items-center gap-1 mt-0.5">
+                <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                  @{account.linkedinProfileId}
+                </p>
+                <button
+                  onClick={copyProfileUrl}
+                  className="p-0.5 rounded hover:bg-white/10 transition-colors"
+                  title="Copy profile URL"
+                >
+                  {copied ? (
+                    <Check size={10} style={{ color: 'var(--color-success)' }} />
+                  ) : (
+                    <Copy size={10} style={{ color: 'var(--text-muted)' }} />
+                  )}
+                </button>
+              </div>
+            )}
 
-        <Linkedin size={18} style={{ color: '#0A66C2', flexShrink: 0 }} />
-      </div>
-
-      {/* Expired warning + reconnect */}
-      {account.status === 'expired' && (
-        <div
-          className="flex items-center justify-between gap-3 p-3 rounded-lg"
-          style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)' }}
-        >
-          <div className="flex items-center gap-2">
-            <AlertTriangle size={14} style={{ color: '#ef4444' }} />
-            <p className="text-xs" style={{ color: '#ef4444' }}>
-              Session expired — reconnect to resume syncing
-            </p>
+            {account.lastSyncedAt && (
+              <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                Last synced {relativeTime(account.lastSyncedAt)}
+              </p>
+            )}
+            
+            {account.status === 'active' && expiryText && (
+              <p className="text-xs mt-0.5" style={{ color: 'var(--color-warning)' }}>
+                {expiryText}
+              </p>
+            )}
           </div>
-          <button
-            onClick={handleReconnect}
-            disabled={isReconnecting}
-            className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all disabled:opacity-50 shrink-0"
-            style={{ background: '#ef4444', color: 'white' }}
-          >
-            {isReconnecting ? <Loader2 size={12} className="animate-spin" /> : 'Reconnect'}
-          </button>
-        </div>
-      )}
 
-      {/* Rate limits (lazy loaded) */}
-      {!rateLimits && !limitsLoading && (
-        <button
-          onClick={loadRateLimits}
-          className="text-xs px-3 py-1.5 rounded-lg border transition-all hover:opacity-80"
-          style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
-        >
-          Load Rate Limits
-        </button>
-      )}
-      {limitsLoading && (
-        <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--text-muted)' }}>
-          <Loader2 size={12} className="animate-spin" /> Loading limits…
+          <Linkedin size={18} style={{ color: 'var(--color-linkedin)', flexShrink: 0 }} />
         </div>
-      )}
-      {rateLimits && (
-        <div className="space-y-2">
-          {rateLimits.messagesSent && (
-            <RateLimitBar label="Messages" current={rateLimits.messagesSent.current} limit={rateLimits.messagesSent.limit} resetsAt={rateLimits.messagesSent.resetsAt} />
-          )}
-          {rateLimits.connectRequests && (
-            <RateLimitBar label="Connections" current={rateLimits.connectRequests.current} limit={rateLimits.connectRequests.limit} resetsAt={rateLimits.connectRequests.resetsAt} />
-          )}
-        </div>
-      )}
 
-      {/* Actions */}
-      <div className="flex gap-2 pt-2 border-t" style={{ borderColor: 'var(--border)' }}>
-        {account.status !== 'expired' && (
-          <button
-            onClick={handleReconnect}
-            disabled={isReconnecting}
-            title="Re-authenticate LinkedIn"
-            className="px-3 py-2 rounded-lg border text-sm font-medium transition-all disabled:opacity-50 flex items-center gap-1.5"
-            style={{ borderColor: 'var(--border)', color: 'var(--text-secondary)' }}
+        {/* Expired warning + reconnect */}
+        {account.status === 'expired' && (
+          <div
+            className="flex items-center justify-between gap-3 p-3 rounded-lg"
+            style={{ background: 'var(--color-danger-bg)', border: '1px solid var(--color-danger)' }}
           >
-            {isReconnecting ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-            Refresh
-          </button>
+            <div className="flex items-center gap-2">
+              <AlertTriangle size={14} style={{ color: 'var(--color-danger)' }} />
+              <p className="text-xs" style={{ color: 'var(--color-danger)' }}>
+                Session expired — reconnect to resume syncing
+              </p>
+            </div>
+            <button
+              onClick={() => setShowReconnectDialog(true)}
+              disabled={isReconnecting}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all disabled:opacity-50 shrink-0"
+              style={{ background: 'var(--color-danger)', color: 'white' }}
+            >
+              {isReconnecting ? <Loader2 size={12} className="animate-spin" /> : 'Reconnect'}
+            </button>
+          </div>
         )}
 
-        <button
-          onClick={handleDelete}
-          disabled={isDeleting}
-          title="Remove account"
-          className="ml-auto px-3 py-2 rounded-lg border text-sm font-medium transition-all disabled:opacity-50 flex items-center gap-1.5"
-          style={{ borderColor: 'rgba(239,68,68,0.4)', color: '#ef4444' }}
-        >
-          {isDeleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-          Remove
-        </button>
-      </div>
-    </div>
+        {/* Rate limits (lazy loaded) */}
+        <AnimatePresence mode="wait">
+          {!rateLimits && !limitsLoading && (
+            <motion.button
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={loadRateLimits}
+              className="flex items-center gap-2 text-xs px-3 py-1.5 rounded-lg border transition-all hover:opacity-80"
+              style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+            >
+              <BarChart2 size={14} />
+              View Usage Limits
+            </motion.button>
+          )}
+          {limitsLoading && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="flex items-center gap-2 text-xs"
+              style={{ color: 'var(--text-muted)' }}
+            >
+              <Loader2 size={12} className="animate-spin" /> Loading limits…
+            </motion.div>
+          )}
+          {rateLimits && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="space-y-2"
+            >
+              {rateLimits.messagesSent && (
+                <RateLimitBar label="Messages" current={rateLimits.messagesSent.current} limit={rateLimits.messagesSent.limit} resetsAt={rateLimits.messagesSent.resetsAt} />
+              )}
+              {rateLimits.connectRequests && (
+                <RateLimitBar label="Connections" current={rateLimits.connectRequests.current} limit={rateLimits.connectRequests.limit} resetsAt={rateLimits.connectRequests.resetsAt} />
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Actions */}
+        <div className="flex gap-2 pt-2 border-t" style={{ borderColor: 'var(--border)' }}>
+          {account.status !== 'expired' && (
+            <button
+              onClick={() => setShowReconnectDialog(true)}
+              disabled={isReconnecting}
+              title="Re-authenticate LinkedIn"
+              className="px-3 py-2 rounded-lg border text-sm font-medium transition-all disabled:opacity-50 flex items-center gap-1.5"
+              style={{ borderColor: 'var(--border)', color: 'var(--text-secondary)' }}
+            >
+              {isReconnecting ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+              Refresh
+            </button>
+          )}
+
+          <button
+            onClick={() => setShowDeleteDialog(true)}
+            disabled={isDeleting}
+            title="Remove account"
+            className="ml-auto px-3 py-2 rounded-lg border text-sm font-medium transition-all disabled:opacity-50 flex items-center gap-1.5 hover:bg-red-500/10"
+            style={{ borderColor: 'var(--color-danger)', color: 'var(--color-danger)' }}
+          >
+            {isDeleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+            Remove
+          </button>
+        </div>
+      </motion.div>
+
+      {/* Reconnect Confirmation Dialog */}
+      <ConfirmDialog
+        open={showReconnectDialog}
+        onOpenChange={setShowReconnectDialog}
+        title={`Re-authenticate ${account.displayName}?`}
+        description="This will open LinkedIn in a new tab to complete authentication. Keep the new tab open until it completes."
+        confirmLabel="Continue"
+        cancelLabel="Cancel"
+        confirmVariant="primary"
+        onConfirm={handleReconnect}
+      />
+
+      {/* Delete Confirmation Dialog */}
+      <ConfirmDialog
+        open={showDeleteDialog}
+        onOpenChange={setShowDeleteDialog}
+        title={`Remove ${account.displayName}?`}
+        description="This cannot be undone. The account's sync history will be preserved but no new activity will be captured."
+        confirmLabel="Remove Account"
+        cancelLabel="Keep Account"
+        confirmVariant="danger"
+        onConfirm={handleDelete}
+      />
+    </>
   );
 }

@@ -1,26 +1,68 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { signToken } from '@/lib/auth/jwt';
 import { createUser, getUserByEmail } from '@/lib/models/user';
+import { rateLimit, getClientIp } from '@/lib/rate-limiter';
 import bcrypt from 'bcrypt';
+
+// Validation schema with proper sanitization
+const registerSchema = z.object({
+  name: z.string()
+    .min(1, 'Name is required')
+    .max(100, 'Name must be less than 100 characters')
+    .trim()
+    .transform(val => val.replace(/[<>]/g, '')), // Basic XSS sanitization
+  email: z.string()
+    .email('Invalid email format')
+    .min(1)
+    .max(254)
+    .trim()
+    .toLowerCase(),
+  password: z.string()
+    .min(8, 'Password must be at least 8 characters')
+    .max(128, 'Password must be less than 128 characters'),
+});
+
+// Type for register request
+interface RegisterRequestBody {
+  name: string;
+  email: string;
+  password: string;
+}
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { name, email, password } = body;
-    
-    if (!name || !email || !password) {
+    // Rate limiting: 3 registrations per hour per IP
+    const ip = getClientIp(req);
+    const { success: rateLimitOk, reset } = await rateLimit(`register:${ip}`, {
+      windowMs: 60 * 60 * 1000, // 1 hour
+      maxRequests: 3,
+    });
+
+    if (!rateLimitOk) {
       return NextResponse.json(
-        { error: 'Name, email, and password are required' }, 
+        { error: 'Too many registration attempts. Please try again later.' },
+        { 
+          status: 429,
+          headers: {
+            'X-RateLimit-Reset': reset.toString(),
+          },
+        }
+      );
+    }
+
+    // Parse and validate request body
+    const body: unknown = await req.json();
+    const parsed = registerSchema.safeParse(body);
+
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: 'Invalid input', details: parsed.error.format() },
         { status: 400 }
       );
     }
 
-    if (password.length < 8) {
-      return NextResponse.json(
-        { error: 'Password must be at least 8 characters long' }, 
-        { status: 400 }
-      );
-    }
+    const { name, email, password } = parsed.data as RegisterRequestBody;
     
     const existingUser = await getUserByEmail(email);
     if (existingUser) {
@@ -60,7 +102,12 @@ export async function POST(req: NextRequest) {
     
     return response;
   } catch (error) {
-    console.error('Registration error:', error);
+    // Log error securely (no stack traces in production)
+    if (process.env.NODE_ENV === 'development') {
+      // eslint-disable-next-line no-console
+      console.error('Registration error:', error);
+    }
+    
     return NextResponse.json(
       { error: 'Registration failed' },
       { status: 500 }

@@ -1,19 +1,55 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { getUserByEmail } from '@/lib/models/user';
 import { signToken } from '@/lib/auth/jwt';
+import { rateLimit, getClientIp } from '@/lib/rate-limiter';
 import bcrypt from 'bcrypt';
+
+// Validation schema
+const loginSchema = z.object({
+  email: z.string().email('Invalid email format').min(1).max(254),
+  password: z.string().min(8).max(128),
+});
+
+// Type for login request
+interface LoginRequestBody {
+  email: string;
+  password: string;
+}
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { email, password } = body;
-    
-    if (!email || !password) {
+    // Rate limiting: 5 attempts per 15 minutes per IP
+    const ip = getClientIp(req);
+    const { success: rateLimitOk, reset } = await rateLimit(`login:${ip}`, {
+      windowMs: 15 * 60 * 1000,
+      maxRequests: 5,
+    });
+
+    if (!rateLimitOk) {
       return NextResponse.json(
-        { error: 'Email and password are required' }, 
+        { error: 'Too many attempts. Please wait 15 minutes.' },
+        { 
+          status: 429,
+          headers: {
+            'X-RateLimit-Reset': reset.toString(),
+          },
+        }
+      );
+    }
+
+    // Parse and validate request body
+    const body: unknown = await req.json();
+    const parsed = loginSchema.safeParse(body);
+
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: 'Invalid input', details: parsed.error.format() },
         { status: 400 }
       );
     }
+
+    const { email, password } = parsed.data as LoginRequestBody;
     
     const user = await getUserByEmail(email);
     if (!user) {
@@ -50,7 +86,12 @@ export async function POST(req: NextRequest) {
     
     return response;
   } catch (error) {
-    console.error('Login error:', error);
+    // Log error securely (no stack traces in production)
+    if (process.env.NODE_ENV === 'development') {
+      // eslint-disable-next-line no-console
+      console.error('Login error:', error);
+    }
+    
     return NextResponse.json(
       { error: 'Login failed' },
       { status: 500 }
