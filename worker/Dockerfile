@@ -11,17 +11,27 @@ RUN apt-get update && apt-get install -y wget gnupg \
   && rm -rf /var/lib/apt/lists/*
 
 # Xvfb for virtual display (headed mode without a real screen)
-RUN apt-get update && apt-get install -y xvfb x11-utils \
+RUN apt-get update && apt-get install -y xvfb x11vnc novnc websockify \
   && rm -rf /var/lib/apt/lists/*
 
+# Install Node.js dependencies
 COPY package.json ./
-RUN npm install --omit=dev
+RUN npm install
 
-COPY entrypoint.sh ./
-RUN chmod +x entrypoint.sh
+# Copy prisma schema
+COPY prisma ./prisma/
+RUN npx prisma generate
 
-COPY src/ ./src/
+# Copy source and build
+COPY . .
+RUN npm run build
+
+# Create profiles directory
+RUN mkdir -p /app/profiles
 
 EXPOSE 3001
 
-ENTRYPOINT ["./entrypoint.sh"]
+ENV CHROME_PATH=/usr/bin/google-chrome
+ENV DISPLAY=:99
+
+CMD ["npm", "start"]

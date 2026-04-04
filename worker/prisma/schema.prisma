@@ -1,5 +1,5 @@
-// Prisma schema for LinkedIn Hyper-V — multi-tenant
-// User login (NextAuth) is separate from LinkedIn account connection
+// Prisma schema for LinkedIn Hyper-V v2
+// Complete rewrite with per-account fingerprint isolation and enterprise features
 
 generator client {
   provider = "prisma-client-js"
@@ -10,65 +10,133 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ── App user (NextAuth email/password) ───────────────────────────────────────
+// ── Dashboard User (NextAuth-style authentication) ────────────────────────────
 
 model User {
-  id             String           @id @default(uuid())
-  email          String           @unique
-  passwordHash   String
-  role           String           @default("user")
-  createdAt      DateTime         @default(now())
-  updatedAt      DateTime         @updatedAt
-
+  id            String    @id @default(uuid())
+  email         String    @unique
+  passwordHash  String    // Argon2id hash
+  role          String    @default("operator") // superadmin, manager, operator
+  totpSecret    String?   // For 2FA
+  lastLoginAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
   linkedInAccounts LinkedInAccount[]
-
+  auditLogs        AuditLog[]
+  
   @@map("users")
 }
 
-// ── Status enum for LinkedIn account sessions ────────────────────────────────
+// ── LinkedIn Account (Core entity for automation) ─────────────────────────────
 
-enum LinkedInAccountStatus {
-  pending
+enum AccountStatus {
+  inactive
   active
-  expired
+  quarantined
+  banned
+  warming
+  captcha_challenge
+  twofa_required
 }
 
-// ── LinkedIn account (connected by a User, holds encrypted storageState) ─────
-
 model LinkedInAccount {
-  id                     String                @id @default(uuid())
-  userId                 String
-  linkedinProfileId      String?
-  displayName            String                @default("")
-  encryptedStorageState  String?               @db.Text
-  sessionExpiresAt       DateTime?
-  status                 LinkedInAccountStatus @default(pending)
-  lastSyncedAt           DateTime?
-  createdAt              DateTime              @default(now())
-  updatedAt              DateTime              @updatedAt
-
-  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  conversations Conversation[]
-  messages      Message[]
-  connections   Connection[]
-  notifications Notification[]
-
+  id                  String        @id // User-provided account ID
+  userId              String
+  displayName         String
+  email               String        // LinkedIn login email (encrypted at application level)
+  linkedinUrl         String?
+  status              AccountStatus @default(inactive)
+  trustScore          Int           @default(50) // 0-100
+  
+  // Fingerprint profile for anti-detection
+  canvasSeed          Int
+  webglProfileIndex   Int           @default(0)
+  viewportWidth       Int           @default(1920)
+  viewportHeight      Int           @default(1080)
+  viewportScale       Float         @default(1)
+  timezone            String        @default("America/New_York")
+  locale              String        @default("en-US")
+  acceptLanguage      String        @default("en-US,en;q=0.9")
+  userAgent           String?
+  fonts               String[]      @default([])
+  
+  // Session management
+  encryptedCookies    String?       @db.Text // AES-256-GCM encrypted cookies
+  credentialsIv       String?       // IV for credential encryption
+  credentialsAuthTag  String?       // Auth tag for credential encryption
+  sessionExpiresAt    DateTime?
+  lastLoginAt         DateTime?
+  
+  // Rate limiting
+  dailyMessageLimit   Int           @default(25)
+  dailyConnectLimit   Int           @default(15)
+  dailyProfileLimit   Int           @default(50)
+  
+  // Proxy configuration
+  proxyId             String?
+  
+  // Metadata
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+  lastActiveAt        DateTime?
+  
+  // Relations
+  user           User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  proxy          Proxy?               @relation(fields: [proxyId], references: [id])
+  conversations  Conversation[]
+  messages       Message[]
+  connections    Connection[]
+  notifications  Notification[]
+  sequences      Sequence[]
+  enrollments    SequenceEnrollment[]
+  activityLogs   ActivityLog[]
+  sentRequests   ConnectionRequest[]
+  
   @@index([userId])
   @@index([status])
+  @@index([trustScore])
+  @@index([sessionExpiresAt])
   @@map("linkedin_accounts")
 }
 
-// ── Conversation (Thread) ────────────────────────────────────────────────────
+// ── Proxy Configuration ──────────────────────────────────────────────────────
+
+model Proxy {
+  id              String   @id @default(uuid())
+  host            String
+  port            Int
+  username        String
+  password        String   // Encrypted
+  country         String   @default("US")
+  stickySession   Boolean  @default(true)
+  isActive        Boolean  @default(true)
+  lastUsedAt      DateTime?
+  failCount       Int      @default(0)
+  createdAt       DateTime @default(now())
+  
+  // Relations
+  accounts LinkedInAccount[]
+  
+  @@index([isActive])
+  @@map("proxies")
+}
+
+// ── Conversation (Message Thread) ─────────────────────────────────────────────
 
 model Conversation {
   id                     String   @id // LinkedIn thread ID
   linkedInAccountId      String
   participantName        String
   participantProfileUrl  String?
+  participantHeadline    String?
   participantAvatarUrl   String?
-  lastMessageAt          DateTime
-  lastMessageText        String   @db.Text
-  lastMessageSentByMe    Boolean
+  lastMessageAt          DateTime?
+  lastMessageText        String?  @db.Text
+  lastMessageSentByMe    Boolean  @default(false)
+  unreadCount            Int      @default(0)
+  tags                   String[] @default([]) // interested, not_interested, question, etc.
+  isArchived             Boolean  @default(false)
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt
 
@@ -78,10 +146,11 @@ model Conversation {
   @@index([linkedInAccountId])
   @@index([lastMessageAt(sort: Desc)])
   @@index([linkedInAccountId, lastMessageAt(sort: Desc)])
+  @@index([unreadCount])
   @@map("conversations")
 }
 
-// ── Message ──────────────────────────────────────────────────────────────────
+// ── Message ───────────────────────────────────────────────────────────────────
 
 model Message {
   id                String   @id @default(uuid())
@@ -89,10 +158,12 @@ model Message {
   linkedInAccountId String
   senderId          String   // LinkedIn user ID or "__self__"
   senderName        String
+  senderProfileUrl  String?
   text              String   @db.Text
   sentAt            DateTime @db.Timestamptz
   isSentByMe        Boolean
   linkedinMessageId String?  // Original LinkedIn message ID if available
+  isRead            Boolean  @default(false)
   createdAt         DateTime @default(now())
 
   conversation    Conversation    @relation(fields: [conversationId], references: [id], onDelete: Cascade)
@@ -102,47 +173,291 @@ model Message {
   @@index([conversationId, sentAt])
   @@index([linkedInAccountId])
   @@index([sentAt(sort: Desc)])
+  @@index([isRead])
   @@map("messages")
 }
 
-// ── Connection (scraped LinkedIn connections) ─────────────────────────────────
+// ── Connection (Existing LinkedIn Connections) ────────────────────────────────
 
 model Connection {
-  id                      String   @id @default(uuid())
+  id                      String    @id @default(uuid())
   linkedInAccountId       String
   linkedinProfileId       String
   name                    String
   profileUrl              String?
   headline                String?
-  connectionCountSnapshot Int?     // total connections count at time of snapshot
-  snapshotHash            String?  // hash of connection list for delta detection
+  company                 String?
+  location                String?
+  avatarUrl               String?
+  connectionCountSnapshot Int?      // Total connections count at time of snapshot
+  snapshotHash            String?   // Hash of connection list for delta detection
   connectedAt             DateTime?
-  createdAt               DateTime @default(now())
+  lastMessagedAt          DateTime?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
 
   linkedInAccount LinkedInAccount @relation(fields: [linkedInAccountId], references: [id], onDelete: Cascade)
 
   @@unique([linkedInAccountId, linkedinProfileId])
   @@index([linkedInAccountId])
+  @@index([connectedAt])
   @@map("connections")
 }
 
-// ── Notification (scraped from LinkedIn notifications page) ──────────────────
+// ── Connection Request (Outbound connection requests) ─────────────────────────
+
+model ConnectionRequest {
+  id                String   @id @default(uuid())
+  linkedInAccountId String
+  targetProfileUrl  String
+  targetProfileId   String?
+  targetName        String?
+  targetHeadline    String?
+  message           String?  @db.Text
+  status            String   @default("pending") // pending, accepted, declined, withdrawn, expired
+  sentAt            DateTime?
+  respondedAt       DateTime?
+  sequenceStepId    String?  // If sent as part of a sequence
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  
+  linkedInAccount LinkedInAccount @relation(fields: [linkedInAccountId], references: [id], onDelete: Cascade)
+  
+  @@index([linkedInAccountId])
+  @@index([status])
+  @@index([sentAt])
+  @@map("connection_requests")
+}
+
+// ── Notification ─────────────────────────────────────────────────────────────
 
 model Notification {
-  id                    String    @id @default(uuid())
-  linkedInAccountId     String
-  linkedinNotificationId String   @unique // LinkedIn's own notification ID for dedup
-  type                  String    // "connection_request", "message", "like", etc.
-  title                 String
-  body                  String?   @db.Text
-  linkedinUrl           String?
-  readAt                DateTime?
-  receivedAt            DateTime
-  createdAt             DateTime  @default(now())
+  id                     String    @id @default(uuid())
+  linkedInAccountId      String
+  linkedinNotificationId String    @unique // LinkedIn's own notification ID for dedup
+  type                   String    // connection_request, message, like, mention, etc.
+  category               String    // growth, jobs, news, etc.
+  title                  String
+  body                   String?   @db.Text
+  linkedinUrl            String?
+  actorName              String?
+  actorProfileUrl        String?
+  isRead                 Boolean   @default(false)
+  readAt                 DateTime?
+  receivedAt             DateTime
+  createdAt              DateTime  @default(now())
 
   linkedInAccount LinkedInAccount @relation(fields: [linkedInAccountId], references: [id], onDelete: Cascade)
 
   @@index([linkedInAccountId])
   @@index([linkedInAccountId, receivedAt(sort: Desc)])
+  @@index([isRead])
   @@map("notifications")
+}
+
+// ── Sequence (Outbound Campaign) ──────────────────────────────────────────────
+
+enum SequenceStatus {
+  draft
+  active
+  paused
+  completed
+}
+
+model Sequence {
+  id          String         @id @default(uuid())
+  name        String
+  linkedInAccountId String
+  status      SequenceStatus @default(draft)
+  steps       Json           // SequenceStep[]
+  dailyLimit  Int            @default(10)
+  
+  // Scheduling
+  scheduleDays      String[]  @default(["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"])
+  scheduleStartHour Int       @default(9)   // 9 AM
+  scheduleEndHour   Int       @default(19)  // 7 PM
+  timezone          String    @default("America/New_York")
+  
+  // AI settings
+  aiEnabled         Boolean   @default(false)
+  aiModel           String    @default("gpt-4o")
+  aiPromptTemplate  String?   @db.Text
+  
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  
+  // Relations
+  linkedInAccount LinkedInAccount      @relation(fields: [linkedInAccountId], references: [id], onDelete: Cascade)
+  enrollments     SequenceEnrollment[]
+  
+  @@index([linkedInAccountId])
+  @@index([status])
+  @@map("sequences")
+}
+
+// ── Sequence Enrollment ──────────────────────────────────────────────────────
+
+enum EnrollmentStatus {
+  active
+  paused
+  completed
+  failed
+  bounced
+}
+
+model SequenceEnrollment {
+  id                String           @id @default(uuid())
+  sequenceId        String
+  linkedInAccountId String
+  contactProfileUrl String
+  contactProfileId  String?
+  contactName       String?
+  contactHeadline   String?
+  contactCompany    String?
+  
+  // Progress
+  currentStepIndex  Int              @default(0)
+  status            EnrollmentStatus @default(active)
+  failureReason     String?
+  
+  // Metadata
+  customVariables   Json?            // For template personalization
+  startedAt         DateTime         @default(now())
+  completedAt       DateTime?
+  lastActionAt      DateTime?
+  nextActionAt      DateTime?
+  
+  // Relations
+  linkedInAccount LinkedInAccount @relation(fields: [linkedInAccountId], references: [id], onDelete: Cascade)
+  sequence        Sequence        @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+  
+  @@index([linkedInAccountId])
+  @@index([sequenceId])
+  @@index([status])
+  @@index([nextActionAt])
+  @@map("sequence_enrollments")
+}
+
+// ── Activity Log (Audit Trail) ───────────────────────────────────────────────
+
+enum ActivityStatus {
+  success
+  failure
+  retry
+  warning
+}
+
+model ActivityLog {
+  id              String         @id @default(uuid())
+  linkedInAccountId String
+  userId          String?        // Dashboard user who initiated (if applicable)
+  action          String         // send_message, send_connection, scrape_inbox, etc.
+  target          String?        // Target profile URL, conversation ID, etc.
+  status          ActivityStatus
+  errorMessage    String?
+  metadata        Json?
+  
+  // Tamper-evident logging
+  hmac            String         // HMAC-SHA256 of this record + previous record's HMAC
+  sequenceNumber  Int            @default(autoincrement())
+  
+  createdAt       DateTime       @default(now())
+  
+  linkedInAccount LinkedInAccount? @relation(fields: [linkedInAccountId], references: [id], onDelete: Cascade)
+  user            User?            @relation(fields: [userId], references: [id], onDelete: SetNull)
+  
+  @@index([linkedInAccountId])
+  @@index([createdAt])
+  @@index([action])
+  @@index([status])
+  @@map("activity_logs")
+}
+
+// ── Dashboard Audit Log (Admin actions) ──────────────────────────────────────
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  userId      String
+  action      String   // login, logout, account_create, settings_update, etc.
+  resource    String?  // affected resource type
+  resourceId  String?  // affected resource ID
+  oldValues   Json?    // Previous values (for updates)
+  newValues   Json?    // New values
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+  
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId])
+  @@index([createdAt])
+  @@index([action])
+  @@map("audit_logs")
+}
+
+// ── Message Template ─────────────────────────────────────────────────────────
+
+model MessageTemplate {
+  id          String   @id @default(uuid())
+  name        String
+  category    String   @default("general") // connection, followup, reengagement
+  subject     String?
+  body        String   @db.Text
+  variables   String[] @default([]) // {{first_name}}, {{company}}, etc.
+  
+  // Analytics
+  useCount    Int      @default(0)
+  replyRate   Float?   // Calculated from actual usage
+  
+  isSystem    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([category])
+  @@map("message_templates")
+}
+
+// ── Blacklist / Suppression List ─────────────────────────────────────────────
+
+model BlacklistEntry {
+  id          String   @id @default(uuid())
+  type        String   // domain, profile_url, keyword, company
+  value       String   // @competitor.com, linkedin.com/in/john, recruiter, etc.
+  reason      String?
+  createdAt   DateTime @default(now())
+  
+  @@unique([type, value])
+  @@index([type])
+  @@map("blacklist_entries")
+}
+
+// ── System Settings ───────────────────────────────────────────────────────────
+
+model SystemSetting {
+  key         String   @id
+  value       String
+  description String?
+  isSecret    Boolean  @default(false)
+  updatedAt   DateTime @updatedAt
+  updatedBy   String?
+  
+  @@map("system_settings")
+}
+
+// ── Webhook Configuration ────────────────────────────────────────────────────
+
+model Webhook {
+  id          String   @id @default(uuid())
+  name        String
+  url         String
+  events      String[] // new_message, connection_accepted, captcha_detected, etc.
+  isActive    Boolean  @default(true)
+  secret      String?  // For HMAC signature
+  lastError   String?
+  lastCalledAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([isActive])
+  @@map("webhooks")
 }
