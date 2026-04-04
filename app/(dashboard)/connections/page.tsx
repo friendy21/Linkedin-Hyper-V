@@ -1,98 +1,82 @@
+// FILE: app/(dashboard)/connections/page.tsx
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
-import type { Connection, Account } from '@/types/dashboard';
-import { getAccounts, getAccountActivity } from '@/lib/api-client';
+import { useState, useEffect, useCallback } from 'react';
 import { ConnectionGrid } from '@/components/connections/ConnectionGrid';
-import { Spinner } from '@/components/ui/Spinner';
-import { ErrorState } from '@/components/ui/ErrorState';
+import { motion } from 'framer-motion';
+import { toast } from '@/components/ui/Toast';
+
+interface Connection {
+  id: string;
+  name: string;
+  headline?: string | null;
+  profileUrl?: string | null;
+  avatarUrl?: string | null;
+  linkedInAccountId: string;
+  accountDisplayName?: string;
+}
+
+interface Account {
+  id: string;
+  displayName?: string;
+}
 
 export default function ConnectionsPage() {
   const [connections, setConnections] = useState<Connection[]>([]);
-  const [accounts,    setAccounts]    = useState<Account[]>([]);
-  const [search,      setSearch]      = useState('');
-  // F6 — Debounced copy of search to avoid per-keystroke full-array scans
-  const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [filter,      setFilter]      = useState<string>('all');
-  const [loading,     setLoading]     = useState(true);
-  const [error,       setError]       = useState<string | null>(null);
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  // F6 — 150 ms debounce: update debouncedSearch only after the user pauses typing
-  useEffect(() => {
-    const id = setTimeout(() => setDebouncedSearch(search), 150);
-    return () => clearTimeout(id);
-  }, [search]);
-
-  const load = useCallback(async () => {
+  const fetchData = useCallback(async () => {
     try {
-      const { accounts: accs } = await getAccounts();
-      setAccounts(accs);
+      const [connRes, accRes] = await Promise.all([
+        fetch('/api/connections'),
+        fetch('/api/linkedin-accounts'),
+      ]);
 
-      const logs = await Promise.all(
-        accs.map(async (a) => {
-          const { entries } = await getAccountActivity(a.id, 0, 200);
-          return entries
-            .filter((e) => e.type === 'connectionSent')
-            .map((e): Connection => ({
-              accountId:   a.id,
-              name:        e.targetName,
-              profileUrl:  e.targetProfileUrl,
-              connectedAt: e.timestamp,
-            }));
-        })
-      );
+      if (connRes.ok) {
+        const data: unknown = await connRes.json();
+        const list = Array.isArray(data)
+          ? data as Connection[]
+          : (typeof data === 'object' && data !== null && 'connections' in data)
+          ? (data as { connections: Connection[] }).connections
+          : [];
+        setConnections(list);
+      }
 
-      const all = logs
-        .flat()
-        .sort((a, b) => (b.connectedAt ?? 0) - (a.connectedAt ?? 0));
-
-      setConnections(all);
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load connections');
+      if (accRes.ok) {
+        const data: unknown = await accRes.json();
+        if (typeof data === 'object' && data !== null && 'accounts' in data) {
+          setAccounts((data as { accounts: Account[] }).accounts || []);
+        }
+      }
+    } catch (_) {
+      toast.error('Failed to load connections');
     } finally {
       setLoading(false);
     }
   }, []);
 
-  useEffect(() => {
-    void load();
-    // No polling — connections page is a static view, refresh on mount only
-  }, [load]);
-
-  // F6 — useMemo so the filtered list is recomputed only when the debounced
-  // search string, filter pill, or underlying connections array changes.
-  const filtered = useMemo(
-    () =>
-      connections
-        .filter((c) => filter === 'all' || c.accountId === filter)
-        .filter((c) => c.name.toLowerCase().includes(debouncedSearch.toLowerCase())),
-    [connections, filter, debouncedSearch]
-  );
-
-  if (loading) {
-    return (
-      <div className="flex-1 flex items-center justify-center h-full">
-        <Spinner size="lg" />
-      </div>
-    );
-  }
-
-  if (error) {
-    return <ErrorState message={error} onRetry={load} />;
-  }
+  useEffect(() => { fetchData(); }, [fetchData]);
 
   return (
-    <div className="h-full" style={{ background: 'var(--bg-base)' }}>
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+      className="p-6 max-w-7xl mx-auto"
+    >
+      <div className="mb-6">
+        <h1 className="page-title">Network</h1>
+        <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+          {loading ? '…' : `${connections.length} connections across all accounts`}
+        </p>
+      </div>
+
       <ConnectionGrid
-        connections={filtered}
+        connections={connections}
         accounts={accounts}
-        total={connections.length}
-        search={search}
-        filter={filter}
-        onSearchChange={setSearch}
-        onFilterChange={setFilter}
+        loading={loading}
       />
-    </div>
+    </motion.div>
   );
 }

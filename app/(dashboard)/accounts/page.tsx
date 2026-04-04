@@ -1,19 +1,26 @@
 // FILE: app/(dashboard)/accounts/page.tsx
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { AccountCard } from '@/components/accounts/AccountCard';
 import { AddAccountModal } from '@/components/accounts/AddAccountModal';
-import { Plus, Loader2, Linkedin } from 'lucide-react';
+import { SkeletonCard } from '@/components/ui/SkeletonLoader';
+import { Button } from '@/components/ui/Button';
+import { Plus, UserCircle } from 'lucide-react';
+import { motion } from 'framer-motion';
+import { toast } from '@/components/ui/Toast';
 
 interface LinkedInAccount {
   id: string;
-  displayName: string;
+  displayName?: string;
+  email?: string;
   linkedinProfileId?: string | null;
   status: 'active' | 'expired' | 'pending';
+  isActive?: boolean;
   lastSyncedAt?: string | null;
-  sessionExpiresAt?: string | null;
+  lastCheckedAt?: string | null;
   createdAt: string;
+  rateLimits?: Record<string, { current: number; limit: number; remaining: number }>;
 }
 
 export default function AccountsPage() {
@@ -21,88 +28,125 @@ export default function AccountsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
 
-  useEffect(() => { fetchAccounts(); }, []);
-
-  const fetchAccounts = async () => {
-    setIsLoading(true);
+  const fetchAccounts = useCallback(async () => {
     try {
       const res = await fetch('/api/linkedin-accounts');
       if (res.ok) {
-        const data = await res.json();
-        setAccounts(data.accounts || []);
+        const data: unknown = await res.json();
+        if (typeof data === 'object' && data !== null && 'accounts' in data) {
+          setAccounts((data as { accounts: LinkedInAccount[] }).accounts || []);
+        }
       }
-    } catch (err) {
-      console.error('Failed to fetch accounts:', err);
+    } catch (_) {
+      toast.error('Failed to load accounts');
     } finally {
       setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchAccounts(); }, [fetchAccounts]);
+
+  const handleVerify = async (id: string) => {
+    try {
+      const res = await fetch(`/api/accounts/${id}/verify`, { method: 'POST' });
+      if (res.ok) toast.success('Session verified');
+      else toast.error('Verification failed');
+    } catch (_) {
+      toast.error('Network error');
+    }
+  };
+
+  const handleReconnect = async (id: string) => {
+    try {
+      const res = await fetch(`/api/accounts/${id}/reconnect`, { method: 'POST' });
+      if (res.ok) { toast.success('Reconnection queued'); fetchAccounts(); }
+      else toast.error('Failed to reconnect');
+    } catch (_) {
+      toast.error('Network error');
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    try {
+      const res = await fetch(`/api/linkedin-accounts/${id}`, { method: 'DELETE' });
+      if (res.ok) { toast.success('Account removed'); fetchAccounts(); }
+      else toast.error('Failed to delete account');
+    } catch (_) {
+      toast.error('Network error');
     }
   };
 
   return (
-    <div className="p-8 max-w-7xl mx-auto">
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+      className="p-6 max-w-7xl mx-auto"
+    >
       {/* Header */}
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-3xl font-bold" style={{ color: 'var(--text-primary)' }}>
-            LinkedIn Accounts
-          </h1>
-          <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>
+          <h1 className="page-title">LinkedIn Accounts</h1>
+          <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
             Connect and manage your LinkedIn accounts
           </p>
         </div>
-        <button
+        <Button
+          id="add-account-trigger"
+          variant="primary"
+          size="md"
+          leftIcon={<Plus size={15} />}
           onClick={() => setIsAddModalOpen(true)}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all hover:opacity-90"
-          style={{ background: '#0A66C2', color: 'white' }}
         >
-          <Plus size={18} />
           Add Account
-        </button>
+        </Button>
       </div>
 
       {/* Loading */}
       {isLoading && (
-        <div className="flex items-center justify-center py-12">
-          <Loader2 size={32} className="animate-spin" style={{ color: 'var(--accent)' }} />
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {Array.from({ length: 3 }).map((_, i) => <SkeletonCard key={i} />)}
         </div>
       )}
 
-      {/* Empty State */}
+      {/* Empty state */}
       {!isLoading && accounts.length === 0 && (
         <div
-          className="text-center py-16 rounded-xl border"
-          style={{ background: 'var(--bg-panel)', borderColor: 'var(--border)' }}
+          className="text-center py-16 rounded-2xl"
+          style={{ backgroundColor: 'var(--bg-elevated)', border: '1px solid var(--border)' }}
         >
           <div
-            className="w-16 h-16 rounded-xl flex items-center justify-center mx-auto mb-4"
-            style={{ background: '#0A66C2' }}
+            className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4"
+            style={{ backgroundColor: 'var(--accent-glow)' }}
           >
-            <Linkedin size={32} color="white" />
+            <UserCircle size={32} style={{ color: 'var(--accent)' }} />
           </div>
-          <h3 className="text-lg font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>
-            No LinkedIn Accounts Connected
+          <h3 className="text-base font-semibold mb-1" style={{ color: 'var(--text-primary)' }}>
+            No accounts connected
           </h3>
-          <p className="text-sm mb-6 max-w-sm mx-auto" style={{ color: 'var(--text-muted)' }}>
-            Connect your first LinkedIn account to start syncing messages, connections, and notifications.
+          <p className="text-sm mb-6 max-w-xs mx-auto" style={{ color: 'var(--text-muted)' }}>
+            Connect your first LinkedIn account to start syncing messages and connections.
           </p>
-          <button
-            onClick={() => setIsAddModalOpen(true)}
-            className="px-6 py-2.5 rounded-lg font-medium"
-            style={{ background: '#0A66C2', color: 'white' }}
-          >
-            Connect LinkedIn Account
-          </button>
+          <Button variant="primary" size="md" leftIcon={<Plus size={15} />} onClick={() => setIsAddModalOpen(true)}>
+            Connect Account
+          </Button>
         </div>
       )}
 
-      {/* Account Grid */}
+      {/* Grid */}
       {!isLoading && accounts.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {accounts.map((account) => (
             <AccountCard
               key={account.id}
-              account={account}
-              onRefresh={fetchAccounts}
+              account={{
+                ...account,
+                isActive: account.isActive ?? account.status === 'active',
+                lastCheckedAt: account.lastCheckedAt ?? account.lastSyncedAt ?? undefined,
+              }}
+              onVerify={handleVerify}
+              onReconnect={handleReconnect}
+              onDelete={handleDelete}
             />
           ))}
         </div>
@@ -110,9 +154,9 @@ export default function AccountsPage() {
 
       <AddAccountModal
         open={isAddModalOpen}
-        onClose={() => setIsAddModalOpen(false)}
-        onSuccess={() => { fetchAccounts(); setIsAddModalOpen(false); }}
+        onOpenChange={setIsAddModalOpen}
+        onSuccess={fetchAccounts}
       />
-    </div>
+    </motion.div>
   );
 }

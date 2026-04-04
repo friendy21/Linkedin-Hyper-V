@@ -1,0 +1,45 @@
+﻿.next/types/validator.ts(225,31): error TS2344: Type 'typeof import("C:/Users/User/Downloads/Linkedin-Hyper-V-main/Linkedin-Hyper-V-main/app/api/linkedin-accounts/[id]/reconnect/route")' does not satisfy the constraint 'RouteHandlerConfig<"/api/linkedin-accounts/[id]/reconnect">'.
+  Types of property 'POST' are incompatible.
+    Type '(_req: NextRequest, { params }: Params) => Promise<NextResponse<unknown>>' is not assignable to type '(request: NextRequest, context: { params: Promise<{ id: string; }>; }) => void | Response | Promise<void | Response>'.
+      Types of parameters '__1' and 'context' are incompatible.
+        Type '{ params: Promise<{ id: string; }>; }' is not assignable to type 'Params'.
+          Types of property 'params' are incompatible.
+            Property 'id' is missing in type 'Promise<{ id: string; }>' but required in type '{ id: string; }'.
+.next/types/validator.ts(234,31): error TS2344: Type 'typeof import("C:/Users/User/Downloads/Linkedin-Hyper-V-main/Linkedin-Hyper-V-main/app/api/linkedin-accounts/[id]/route")' does not satisfy the constraint 'RouteHandlerConfig<"/api/linkedin-accounts/[id]">'.
+  Types of property 'DELETE' are incompatible.
+    Type '(_req: NextRequest, { params }: Params) => Promise<NextResponse<unknown>>' is not assignable to type '(request: NextRequest, context: { params: Promise<{ id: string; }>; }) => void | Response | Promise<void | Response>'.
+      Types of parameters '__1' and 'context' are incompatible.
+        Type '{ params: Promise<{ id: string; }>; }' is not assignable to type 'Params'.
+          Types of property 'params' are incompatible.
+            Property 'id' is missing in type 'Promise<{ id: string; }>' but required in type '{ id: string; }'.
+app/(dashboard)/page.tsx(157,40): error TS2719: Type 'Account[]' is not assignable to type 'Account[]'. Two different types with this name exist, but they are unrelated.
+  Type 'Account' is not assignable to type 'Account'. Two different types with this name exist, but they are unrelated.
+    Types of property 'rateLimits' are incompatible.
+      Type 'unknown' is not assignable to type 'RateLimits | undefined'.
+app/api/linkedin-accounts/[id]/reconnect/route.ts(2,34): error TS2307: Cannot find module 'next-auth/next' or its corresponding type declarations.
+app/api/linkedin-accounts/[id]/reconnect/route.ts(3,29): error TS2307: Cannot find module '@/lib/auth/nextauth' or its corresponding type declarations.
+app/api/linkedin-accounts/[id]/route.ts(2,34): error TS2307: Cannot find module 'next-auth/next' or its corresponding type declarations.
+app/api/linkedin-accounts/[id]/route.ts(3,29): error TS2307: Cannot find module '@/lib/auth/nextauth' or its corresponding type declarations.
+app/api/linkedin-accounts/connect/route.ts(2,34): error TS2307: Cannot find module 'next-auth/next' or its corresponding type declarations.
+app/api/linkedin-accounts/connect/route.ts(3,29): error TS2307: Cannot find module '@/lib/auth/nextauth' or its corresponding type declarations.
+app/api/linkedin-accounts/route.ts(2,34): error TS2307: Cannot find module 'next-auth/next' or its corresponding type declarations.
+app/api/linkedin-accounts/route.ts(3,29): error TS2307: Cannot find module '@/lib/auth/nextauth' or its corresponding type declarations.
+app/api/notifications/route.ts(2,34): error TS2307: Cannot find module 'next-auth/next' or its corresponding type declarations.
+app/api/notifications/route.ts(3,29): error TS2307: Cannot find module '@/lib/auth/nextauth' or its corresponding type declarations.
+app/api/user/me/route.ts(34,25): error TS2551: Property 'createdAt' does not exist on type 'User'. Did you mean 'created_at'?
+components/dashboard/AccountStatusRow.tsx(142,28): error TS2322: Type '{ date: string; className: string; }' is not assignable to type 'IntrinsicAttributes & TimeAgoProps'.
+  Property 'date' does not exist on type 'IntrinsicAttributes & TimeAgoProps'.
+components/dashboard/RecentActivity.tsx(67,26): error TS2322: Type '{ date: string; className: string; }' is not assignable to type 'IntrinsicAttributes & TimeAgoProps'.
+  Property 'date' does not exist on type 'IntrinsicAttributes & TimeAgoProps'.
+components/dashboard/StatsGrid.tsx(75,31): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(props: { size?: number | undefined; className?: string | undefined; }, context?: any): string | number | bigint | boolean | ReactElement<unknown, string | JSXElementConstructor<any>> | ... 4 more ... | undefined', gave the following error.
+    Type '{ size: number; style: { color: string; }; }' is not assignable to type 'IntrinsicAttributes & { size?: number | undefined; className?: string | undefined; }'.
+      Property 'style' does not exist on type 'IntrinsicAttributes & { size?: number | undefined; className?: string | undefined; }'.
+  Overload 2 of 2, '(props: { size?: number | undefined; className?: string | undefined; }): string | number | bigint | boolean | ReactElement<unknown, string | JSXElementConstructor<any>> | ... 4 more ... | undefined', gave the following error.
+    Type '{ size: number; style: { color: string; }; }' is not assignable to type 'IntrinsicAttributes & { size?: number | undefined; className?: string | undefined; }'.
+      Property 'style' does not exist on type 'IntrinsicAttributes & { size?: number | undefined; className?: string | undefined; }'.
+components/inbox/ConversationList.tsx(165,32): error TS2322: Type '{ date: string; className: string; }' is not assignable to type 'IntrinsicAttributes & TimeAgoProps'.
+  Property 'date' does not exist on type 'IntrinsicAttributes & TimeAgoProps'.
+components/notifications/NotificationFeed.tsx(170,30): error TS2322: Type '{ date: string; className: string; }' is not assignable to type 'IntrinsicAttributes & TimeAgoProps'.
+  Property 'date' does not exist on type 'IntrinsicAttributes & TimeAgoProps'.
+components/providers/AuthProvider.tsx(9,10): error TS2724: '"@/components/ui/Toast"' has no exported member named 'Toast'. Did you mean 'toast'?

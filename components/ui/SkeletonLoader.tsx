@@ -1,79 +1,109 @@
 // FILE: components/ui/SkeletonLoader.tsx
-// Loading skeleton components for better UX
-
 import { cn } from '@/lib/utils';
 
-export function ConversationSkeleton() {
+interface SkeletonProps {
+  width?: string | number;
+  height?: string | number;
+  className?: string;
+}
+
+const shimmerStyle: React.CSSProperties = {
+  background:
+    'linear-gradient(90deg, var(--bg-elevated) 25%, rgba(255,255,255,0.06) 50%, var(--bg-elevated) 75%)',
+  backgroundSize: '200% 100%',
+  animation: 'shimmer 1.6s ease-in-out infinite',
+};
+
+export function Skeleton({ width, height, className }: SkeletonProps) {
   return (
-    <div className="flex gap-3 p-4 border-b animate-pulse" style={{ borderColor: 'var(--border-color)' }}>
-      {/* Avatar */}
-      <div 
-        className="w-12 h-12 rounded-full flex-shrink-0" 
-        style={{ backgroundColor: 'var(--color-gray-200)' }}
-      />
-      
-      {/* Content */}
-      <div className="flex-1 space-y-2">
-        {/* Name */}
-        <div 
-          className="h-4 rounded" 
-          style={{ 
-            backgroundColor: 'var(--color-gray-200)', 
-            width: '40%' 
-          }}
-        />
-        {/* Message preview */}
-        <div 
-          className="h-3 rounded" 
-          style={{ 
-            backgroundColor: 'var(--color-gray-200)', 
-            width: '80%' 
-          }}
-        />
+    <div
+      className={cn('rounded-lg', className)}
+      style={{
+        ...shimmerStyle,
+        width: width !== undefined ? (typeof width === 'number' ? `${width}px` : width) : '100%',
+        height: height !== undefined ? (typeof height === 'number' ? `${height}px` : height) : 16,
+      }}
+    />
+  );
+}
+
+export function SkeletonCard() {
+  return (
+    <div
+      className="rounded-2xl p-5 flex flex-col gap-3"
+      style={{ backgroundColor: 'var(--bg-elevated)', border: '1px solid var(--border)' }}
+    >
+      <div className="flex items-center gap-3">
+        <Skeleton width={40} height={40} className="rounded-xl" />
+        <div className="flex-1 flex flex-col gap-2">
+          <Skeleton height={14} width="50%" />
+          <Skeleton height={11} width="30%" />
+        </div>
       </div>
-      
-      {/* Timestamp */}
-      <div 
-        className="h-3 rounded w-16" 
-        style={{ backgroundColor: 'var(--color-gray-200)' }}
-      />
+      <Skeleton height={28} width="40%" />
+      <Skeleton height={10} width="65%" />
     </div>
   );
 }
 
-export function ConversationListSkeleton({ count = 8 }: { count?: number }) {
+/** Backward-compat multi-variant Skeleton for existing call sites */
+interface LegacySkeletonProps {
+  variant?: 'card' | 'pill' | 'row' | 'text' | 'avatar';
+  count?: number;
+  className?: string;
+}
+
+export function SkeletonLegacy({ variant = 'text', count = 1, className }: LegacySkeletonProps) {
+  const variantMap: Record<string, { height: number | string; className?: string }> = {
+    card:   { height: 128, className: 'rounded-xl' },
+    pill:   { height: 40,  className: 'rounded-full w-24' },
+    row:    { height: 64,  className: 'rounded-lg' },
+    text:   { height: 16,  className: '' },
+    avatar: { height: 40,  className: 'rounded-full w-10' },
+  };
+
+  const cfg = variantMap[variant];
+
   return (
     <>
       {Array.from({ length: count }).map((_, i) => (
-        <ConversationSkeleton key={i} />
+        <Skeleton
+          key={i}
+          height={cfg.height}
+          className={cn(cfg.className, className)}
+        />
       ))}
+    </>
+  );
+}
+
+// ── Conversation / Message skeletons (kept for existing imports) ────────────
+export function ConversationSkeleton() {
+  return (
+    <div className="flex gap-3 p-4 border-b" style={{ borderColor: 'var(--border)' }}>
+      <Skeleton width={44} height={44} className="rounded-full flex-shrink-0" />
+      <div className="flex-1 flex flex-col gap-2 justify-center">
+        <Skeleton height={13} width="40%" />
+        <Skeleton height={11} width="75%" />
+      </div>
+      <Skeleton height={11} width={40} className="mt-1 flex-shrink-0" />
+    </div>
+  );
+}
+
+export function ConversationListSkeleton({ count = 7 }: { count?: number }) {
+  return (
+    <>
+      {Array.from({ length: count }).map((_, i) => <ConversationSkeleton key={i} />)}
     </>
   );
 }
 
 export function MessageSkeleton({ isSentByMe = false }: { isSentByMe?: boolean }) {
   return (
-    <div 
-      className={`flex gap-3 mb-4 animate-pulse ${isSentByMe ? 'flex-row-reverse' : 'flex-row'}`}
-    >
-      {/* Avatar (only for received messages) */}
-      {!isSentByMe && (
-        <div 
-          className="w-8 h-8 rounded-full flex-shrink-0" 
-          style={{ backgroundColor: 'var(--color-gray-200)' }}
-        />
-      )}
-      
-      {/* Message bubble */}
-      <div 
-        className="rounded-xl px-4 py-3" 
-        style={{ 
-          backgroundColor: 'var(--color-gray-200)',
-          maxWidth: '70%',
-          minWidth: '200px',
-          height: '60px',
-        }}
-      />
+    <div className={`flex gap-3 mb-4 ${isSentByMe ? 'flex-row-reverse' : ''}`}>
+      {!isSentByMe && <Skeleton width={32} height={32} className="rounded-full flex-shrink-0" />}
+      <Skeleton height={60} width="60%" className="rounded-2xl" />
     </div>
   );
 }
@@ -82,186 +112,18 @@ export function MessageThreadSkeleton() {
   return (
     <div className="p-4 space-y-4">
       <MessageSkeleton isSentByMe={false} />
-      <MessageSkeleton isSentByMe={true} />
+      <MessageSkeleton isSentByMe />
       <MessageSkeleton isSentByMe={false} />
-      <MessageSkeleton isSentByMe={true} />
+      <MessageSkeleton isSentByMe />
       <MessageSkeleton isSentByMe={false} />
     </div>
   );
 }
 
-export function CardSkeleton() {
-  return (
-    <div 
-      className="rounded-lg p-6 animate-pulse" 
-      style={{ backgroundColor: 'var(--bg-card)' }}
-    >
-      <div 
-        className="h-6 rounded mb-4" 
-        style={{ 
-          backgroundColor: 'var(--color-gray-200)', 
-          width: '60%' 
-        }}
-      />
-      <div 
-        className="h-4 rounded mb-2" 
-        style={{ 
-          backgroundColor: 'var(--color-gray-200)', 
-          width: '40%' 
-        }}
-      />
-      <div 
-        className="h-4 rounded" 
-        style={{ 
-          backgroundColor: 'var(--color-gray-200)', 
-          width: '80%' 
-        }}
-      />
-    </div>
-  );
-}
-
-export function StatCardSkeleton() {
-  return (
-    <div 
-      className="rounded-lg p-6 animate-pulse" 
-      style={{ backgroundColor: 'var(--bg-card)' }}
-    >
-      <div className="flex items-center justify-between mb-4">
-        <div 
-          className="h-4 rounded" 
-          style={{ 
-            backgroundColor: 'var(--color-gray-200)', 
-            width: '40%' 
-          }}
-        />
-        <div 
-          className="w-10 h-10 rounded-lg" 
-          style={{ backgroundColor: 'var(--color-gray-200)' }}
-        />
-      </div>
-      <div 
-        className="h-8 rounded" 
-        style={{ 
-          backgroundColor: 'var(--color-gray-200)', 
-          width: '60%' 
-        }}
-      />
-    </div>
-  );
-}
-
-export function TableRowSkeleton() {
-  return (
-    <tr className="animate-pulse">
-      <td className="p-3">
-        <div 
-          className="h-4 rounded" 
-          style={{ 
-            backgroundColor: 'var(--color-gray-200)', 
-            width: '80%' 
-          }}
-        />
-      </td>
-      <td className="p-3">
-        <div 
-          className="h-4 rounded" 
-          style={{ 
-            backgroundColor: 'var(--color-gray-200)', 
-            width: '60%' 
-          }}
-        />
-      </td>
-      <td className="p-3">
-        <div 
-          className="h-4 rounded" 
-          style={{ 
-            backgroundColor: 'var(--color-gray-200)', 
-            width: '40%' 
-          }}
-        />
-      </td>
-    </tr>
-  );
-}
-
-export function TableSkeleton({ rows = 5 }: { rows?: number }) {
-  return (
-    <table className="w-full">
-      <tbody>
-        {Array.from({ length: rows }).map((_, i) => (
-          <TableRowSkeleton key={i} />
-        ))}
-      </tbody>
-    </table>
-  );
-}
-
-// Standardized Skeleton component with variant support
-interface SkeletonProps {
-  variant?: 'card' | 'pill' | 'row' | 'text' | 'avatar';
-  count?: number;
-  className?: string;
-}
-
-export function Skeleton({ variant = 'text', count = 1, className }: SkeletonProps) {
-  const baseClasses = 'animate-pulse bg-gray-200 dark:bg-gray-700 rounded';
-  
-  const variantClasses = {
-    card: 'w-full h-32 rounded-xl',
-    pill: 'h-10 rounded-full w-24',
-    row: 'w-full h-16 rounded-lg',
-    text: 'h-4 rounded w-full',
-    avatar: 'w-10 h-10 rounded-full',
-  };
-
-  return (
-    <>
-      {Array.from({ length: count }).map((_, i) => (
-        <div
-          key={i}
-          className={cn(baseClasses, variantClasses[variant], className)}
-          style={{ 
-            backgroundColor: 'var(--bg-card)',
-            animationDelay: `${i * 100}ms`,
-          }}
-        />
-      ))}
-    </>
-  );
-}
-
-// Dashboard-specific skeleton layouts
 export function StatsGridSkeleton() {
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-      {Array.from({ length: 4 }).map((_, i) => (
-        <div
-          key={i}
-          className="rounded-xl p-6 animate-pulse"
-          style={{ backgroundColor: 'var(--bg-card)' }}
-        >
-          <div className="flex items-center justify-between mb-4">
-            <div className="h-4 rounded w-24" style={{ backgroundColor: 'var(--bg-hover)' }} />
-            <div className="w-10 h-10 rounded-lg" style={{ backgroundColor: 'var(--bg-hover)' }} />
-          </div>
-          <div className="h-8 rounded w-16" style={{ backgroundColor: 'var(--bg-hover)' }} />
-        </div>
-      ))}
-    </div>
-  );
-}
-
-export function AccountStatusSkeleton() {
-  return (
-    <div className="flex gap-3">
-      {Array.from({ length: 3 }).map((_, i) => (
-        <div
-          key={i}
-          className="h-10 rounded-full w-32 animate-pulse"
-          style={{ backgroundColor: 'var(--bg-card)' }}
-        />
-      ))}
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      {Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} />)}
     </div>
   );
 }
@@ -270,17 +132,13 @@ export function ActivityListSkeleton({ rows = 5 }: { rows?: number }) {
   return (
     <div className="space-y-3">
       {Array.from({ length: rows }).map((_, i) => (
-        <div
-          key={i}
-          className="flex items-center gap-4 p-4 rounded-lg animate-pulse"
-          style={{ backgroundColor: 'var(--bg-card)' }}
-        >
-          <div className="w-10 h-10 rounded-lg" style={{ backgroundColor: 'var(--bg-hover)' }} />
-          <div className="flex-1 space-y-2">
-            <div className="h-4 rounded w-1/3" style={{ backgroundColor: 'var(--bg-hover)' }} />
-            <div className="h-3 rounded w-2/3" style={{ backgroundColor: 'var(--bg-hover)' }} />
+        <div key={i} className="flex items-center gap-4 p-4 rounded-xl" style={{ backgroundColor: 'var(--bg-elevated)' }}>
+          <Skeleton width={10} height={10} className="rounded-full flex-shrink-0" />
+          <div className="flex-1 flex flex-col gap-2">
+            <Skeleton height={13} width="33%" />
+            <Skeleton height={11} width="60%" />
           </div>
-          <div className="h-3 rounded w-16" style={{ backgroundColor: 'var(--bg-hover)' }} />
+          <Skeleton height={11} width={48} />
         </div>
       ))}
     </div>

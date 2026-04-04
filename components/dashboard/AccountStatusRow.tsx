@@ -1,171 +1,148 @@
 // FILE: components/dashboard/AccountStatusRow.tsx
 'use client';
 
-import { useState } from 'react';
-import Link from 'next/link';
-import { motion } from 'framer-motion';
-import { ChevronRight, Plus } from 'lucide-react';
-import type { Account } from '@/types/dashboard';
+import { TimeAgo } from '@/components/ui/TimeAgo';
 
-interface AccountStatusRowProps {
-  accounts: Account[];
-  onAccountClick?: (accountId: string) => void;
+interface RateLimitData {
+  current: number;
+  limit: number;
+  remaining: number;
 }
 
-// SVG Status dots with proper animations
-function StatusDot({ status }: { status: 'active' | 'warning' | 'error' }) {
-  const colors = {
-    active: 'var(--color-success)',
-    warning: 'var(--color-warning)',
-    error: 'var(--color-danger)',
-  };
+interface RateLimits {
+  messagesSent?: RateLimitData;
+  connectRequests?: RateLimitData;
+  profileViews?: RateLimitData;
+}
 
+interface Account {
+  id: string;
+  displayName?: string;
+  email?: string;
+  status?: string;
+  isActive?: boolean;
+  rateLimits?: RateLimits;
+  lastCheckedAt?: string;
+  createdAt?: string;
+}
+
+function nameToColor(name: string): string {
+  const colors = ['#6366f1','#8b5cf6','#ec4899','#f59e0b','#10b981','#0ea5e9','#ef4444'];
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = name.charCodeAt(i) + ((h << 5) - h);
+  return colors[Math.abs(h) % colors.length];
+}
+
+function getInitials(name: string): string {
+  return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+}
+
+function StatusBadge({ status, isActive }: { status?: string; isActive?: boolean }) {
+  const active = isActive || status === 'active';
+  const expired = status === 'expired' || status === 'inactive' || (!isActive && status !== 'warning');
+  const warning = status === 'warning' || status === 'needs_action';
+
+  if (active) return (
+    <span className="flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full"
+      style={{ backgroundColor: 'rgba(16,185,129,0.12)', color: 'var(--success)' }}>
+      <span className="w-1.5 h-1.5 rounded-full status-dot-active" style={{ backgroundColor: 'var(--success)' }} />
+      Active
+    </span>
+  );
+  if (warning) return (
+    <span className="flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full"
+      style={{ backgroundColor: 'rgba(245,158,11,0.12)', color: 'var(--warning)' }}>
+      <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: 'var(--warning)' }} />
+      Warning
+    </span>
+  );
   return (
-    <span
-      className={`w-2.5 h-2.5 rounded-full ${status === 'active' ? 'status-dot-active' : ''}`}
-      style={{ 
-        backgroundColor: colors[status],
-        boxShadow: status === 'active' ? `0 0 8px ${colors[status]}` : 'none',
-      }}
-    />
+    <span className="flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full"
+      style={{ backgroundColor: 'rgba(239,68,68,0.12)', color: 'var(--danger)' }}>
+      <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: 'var(--danger)' }} />
+      Expired
+    </span>
   );
 }
 
-function getAccountStatus(account: Account): { status: 'active' | 'warning' | 'error'; tooltip: string } {
-  if (account.isActive) {
-    return { 
-      status: 'active', 
-      tooltip: `Active • Last seen: ${account.lastSeen ? new Date(account.lastSeen).toLocaleString() : 'Unknown'}` 
-    };
-  }
-  if (account.lastSeen) {
-    const lastSeen = new Date(account.lastSeen);
-    const hoursSince = (Date.now() - lastSeen.getTime()) / (1000 * 60 * 60);
-    if (hoursSince < 24) {
-      return { 
-        status: 'warning', 
-        tooltip: `Warning • Last seen: ${lastSeen.toLocaleString()}` 
-      };
-    }
-  }
-  return { 
-    status: 'error', 
-    tooltip: `Inactive • No recent activity` 
-  };
+function RateLimitBar({ current, limit }: { current: number; limit: number }) {
+  const pct = limit > 0 ? Math.min(100, Math.round((current / limit) * 100)) : 0;
+  const color = pct > 85 ? 'var(--danger)' : pct > 60 ? 'var(--warning)' : 'var(--success)';
+  return (
+    <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--border-strong)' }}>
+      <div style={{ width: `${pct}%`, backgroundColor: color, height: '100%', borderRadius: 9999, transition: 'width 0.4s ease' }} />
+    </div>
+  );
 }
 
-function formatExpiryCountdown(expiresAt: string | null | undefined): string | null {
-  if (!expiresAt) return null;
-  const expiry = new Date(expiresAt).getTime();
-  const now = Date.now();
-  const diff = expiry - now;
-  
-  if (diff <= 0) return 'Expired';
-  
-  const days = Math.floor(diff / (24 * 60 * 60 * 1000));
-  const hours = Math.floor((diff % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000));
-  
-  if (days > 0) {
-    return `Expires in ${days}d ${hours}h`;
-  }
-  return `Expires in ${hours}h`;
-}
-
-export function AccountStatusRow({ accounts, onAccountClick }: AccountStatusRowProps) {
-  const [hoveredAccount, setHoveredAccount] = useState<string | null>(null);
-
-  // Empty state
-  if (accounts.length === 0) {
+export function AccountStatusRow({ accounts }: { accounts: Account[] }) {
+  if (!accounts || accounts.length === 0) {
     return (
-      <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="rounded-xl border p-8 text-center"
-        style={{ background: 'var(--bg-panel)', borderColor: 'var(--border)' }}
-      >
-        <div 
-          className="w-16 h-16 rounded-full mx-auto mb-4 flex items-center justify-center"
-          style={{ background: 'var(--color-linkedin)' }}
-        >
-          <span className="text-white text-2xl font-bold">in</span>
-        </div>
-        <h3 className="font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>
-          No LinkedIn accounts connected
-        </h3>
-        <p className="text-sm mb-4" style={{ color: 'var(--text-muted)' }}>
-          Connect your first account to start automating outreach and tracking activity.
-        </p>
-        <Link
-          href="/accounts"
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-all hover:opacity-90"
-          style={{ background: 'var(--color-linkedin)' }}
-        >
-          <Plus size={16} />
-          Connect Account
-        </Link>
-      </motion.div>
+      <div className="rounded-2xl p-5 text-center" style={{ backgroundColor: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
+        <p className="text-sm" style={{ color: 'var(--text-muted)' }}>No accounts linked</p>
+      </div>
     );
   }
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>
-          Account Status
-        </h3>
-        <Link
-          href="/accounts"
-          className="text-xs flex items-center gap-1 transition-colors hover:opacity-80"
-          style={{ color: 'var(--accent)' }}
-        >
-          View All Accounts
-          <ChevronRight size={14} />
-        </Link>
-      </div>
-      
-      <div className="flex flex-wrap gap-2">
-        {accounts.map((account, index) => {
-          const { status, tooltip } = getAccountStatus(account);
-          const expiryText = formatExpiryCountdown(account.sessionExpiresAt);
-          
+    <div className="rounded-2xl p-5" style={{ backgroundColor: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
+      <h2 className="text-sm font-semibold mb-4" style={{ color: 'var(--text-primary)' }}>Account Status</h2>
+      <div className="flex flex-col gap-3">
+        {accounts.map((account) => {
+          const name = account.displayName || account.email || account.id;
+          const bg = nameToColor(name);
+          const rl = account.rateLimits;
+          const msgPct = rl?.messagesSent
+            ? Math.round((rl.messagesSent.current / rl.messagesSent.limit) * 100)
+            : 0;
+
           return (
-            <motion.button
+            <div
               key={account.id}
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: index * 0.05 }}
-              onClick={() => onAccountClick?.(account.id)}
-              onMouseEnter={() => setHoveredAccount(account.id)}
-              onMouseLeave={() => setHoveredAccount(null)}
-              className="relative flex items-center gap-2 px-3 py-2 rounded-lg border transition-all hover:border-[var(--brand-blue)]/30"
-              style={{ 
-                background: 'var(--bg-panel)', 
-                borderColor: hoveredAccount === account.id ? 'var(--brand-blue)' : 'var(--border)',
+              className="flex items-center gap-3 p-3 rounded-xl transition-shadow"
+              style={{
+                backgroundColor: 'var(--bg-surface)',
+                border: '1px solid var(--border)',
               }}
-              title={tooltip}
+              onMouseEnter={(e) => (e.currentTarget.style.boxShadow = '0 8px 24px rgba(0,0,0,0.3)')}
+              onMouseLeave={(e) => (e.currentTarget.style.boxShadow = 'none')}
             >
-              <StatusDot status={status} />
-              <span 
-                className="text-sm font-medium max-w-[150px] truncate" 
-                style={{ color: 'var(--text-primary)' }}
-                title={account.displayName || account.id}
+              {/* Avatar */}
+              <div
+                className="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+                style={{ backgroundColor: bg }}
               >
-                {account.displayName || account.linkedinProfileId || account.id.slice(0, 8)}
-              </span>
-              
-              {/* Expiry badge */}
-              {status === 'active' && expiryText && (
-                <span 
-                  className="text-[10px] px-1.5 py-0.5 rounded"
-                  style={{ 
-                    background: 'var(--color-warning-bg)', 
-                    color: 'var(--color-warning)' 
-                  }}
-                >
-                  {expiryText}
-                </span>
+                {getInitials(name)}
+              </div>
+
+              {/* Info */}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>{name}</span>
+                  <StatusBadge status={account.status} isActive={account.isActive} />
+                </div>
+                {account.email && (
+                  <p className="text-xs truncate mb-1.5" style={{ color: 'var(--text-muted)' }}>{account.email}</p>
+                )}
+                {rl?.messagesSent && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] w-20 flex-shrink-0" style={{ color: 'var(--text-muted)' }}>
+                      Msgs {rl.messagesSent.current}/{rl.messagesSent.limit}
+                    </span>
+                    <div className="flex-1">
+                      <RateLimitBar current={rl.messagesSent.current} limit={rl.messagesSent.limit} />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Timestamp */}
+              {account.lastCheckedAt && (
+                <div className="flex-shrink-0 text-right">
+                  <TimeAgo timestamp={account.lastCheckedAt} className="text-[10px]" />
+                </div>
               )}
-            </motion.button>
+            </div>
           );
         })}
       </div>

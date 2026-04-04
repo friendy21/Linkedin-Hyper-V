@@ -3,8 +3,10 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { StatsGrid } from '@/components/dashboard/StatsGrid';
+import { AccountStatusRow } from '@/components/dashboard/AccountStatusRow';
+import { RecentActivity } from '@/components/dashboard/RecentActivity';
+import { StatsGridSkeleton, ActivityListSkeleton } from '@/components/ui/SkeletonLoader';
 import { ErrorState } from '@/components/ui/ErrorState';
-import { Skeleton } from '@/components/ui/SkeletonLoader';
 import { RefreshCw } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useAuth } from '@/components/providers/AuthProvider';
@@ -14,6 +16,23 @@ interface DashboardStats {
   totalConnections: number;
   activeAccounts: number;
   totalActivity: number;
+}
+
+interface Account {
+  id: string;
+  displayName?: string;
+  email?: string;
+  status?: string;
+  isActive?: boolean;
+  rateLimits?: Record<string, { current: number; limit: number; remaining: number }>;
+  lastCheckedAt?: string;
+}
+
+interface ActivityEntry {
+  type: string;
+  accountId?: string;
+  targetName?: string;
+  timestamp: number;
 }
 
 export default function DashboardPage() {
@@ -33,61 +52,44 @@ export default function DashboardPage() {
   const fetchDashboardData = useCallback(async (signal?: AbortSignal) => {
     try {
       setError(null);
-      
-      // Fetch accounts with abort signal
-      const accountsRes = await fetch('/api/accounts', { signal });
-      if (!accountsRes.ok) {
-        throw new Error(`Failed to fetch accounts: ${accountsRes.status}`);
-      }
+
+      const [accountsRes, statsRes] = await Promise.all([
+        fetch('/api/accounts', { signal }),
+        fetch('/api/stats/all/summary', { signal }),
+      ]);
+
+      if (!accountsRes.ok) throw new Error(`Accounts fetch failed: ${accountsRes.status}`);
+      if (!statsRes.ok) throw new Error(`Stats fetch failed: ${statsRes.status}`);
+
       const accountsData = await accountsRes.json();
-      const accountsList = accountsData.accounts || [];
+      const statsData = await statsRes.json();
+      const accountsList: Account[] = accountsData.accounts || [];
       setAccounts(accountsList);
 
-      // Fetch overall stats with abort signal
-      const statsRes = await fetch('/api/stats/all/summary', { signal });
-      if (!statsRes.ok) {
-        throw new Error(`Failed to fetch stats: ${statsRes.status}`);
-      }
-      const statsData = await statsRes.json();
-      
       setStats({
         totalMessages: statsData.totalMessages || 0,
         totalConnections: statsData.totalConnections || 0,
-        activeAccounts: accountsList.filter((a: Account) => a.isActive).length,
+        activeAccounts: accountsList.filter((a) => a.isActive).length,
         totalActivity: (statsData.totalMessages || 0) + (statsData.totalConnections || 0),
       });
 
-      // Fetch recent activities from all accounts
-      const activitiesPromises = accountsList.map((account: Account) =>
-        fetch(`/api/stats/${account.id}/activity?limit=5`, { signal })
-          .then(res => {
-            if (!res.ok) throw new Error(`Failed to fetch activity for ${account.id}`);
-            return res.json();
-          })
-          .catch(() => ({ entries: [] })) // Gracefully handle individual account failures
+      const activityResults = await Promise.allSettled(
+        accountsList.map((account) =>
+          fetch(`/api/stats/${account.id}/activity?limit=5`, { signal })
+            .then((r) => (r.ok ? r.json() : { entries: [] }))
+            .catch(() => ({ entries: [] }))
+        )
       );
-      
-      const activitiesResults = await Promise.allSettled(activitiesPromises);
-      const allActivities: ActivityEntry[] = [];
-      
-      activitiesResults.forEach((result) => {
-        if (result.status === 'fulfilled' && result.value.entries) {
-          allActivities.push(...result.value.entries);
-        }
+
+      const all: ActivityEntry[] = [];
+      activityResults.forEach((r) => {
+        if (r.status === 'fulfilled' && r.value.entries) all.push(...r.value.entries);
       });
-
-      // Sort by timestamp and take top 10
-      allActivities.sort((a, b) => b.timestamp - a.timestamp);
-      setActivities(allActivities.slice(0, 10));
-
+      all.sort((a, b) => b.timestamp - a.timestamp);
+      setActivities(all.slice(0, 10));
     } catch (err) {
-      // Don't set error if request was aborted
-      if (err instanceof Error && err.name === 'AbortError') {
-        return;
-      }
-      
-      const message = err instanceof Error ? err.message : 'Failed to load dashboard data';
-      setError(message);
+      if (err instanceof Error && err.name === 'AbortError') return;
+      setError(err instanceof Error ? err.message : 'Failed to load dashboard');
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
@@ -95,12 +97,9 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => {
-    const controller = new AbortController();
-    fetchDashboardData(controller.signal);
-    
-    return () => {
-      controller.abort();
-    };
+    const ctrl = new AbortController();
+    fetchDashboardData(ctrl.signal);
+    return () => ctrl.abort();
   }, [fetchDashboardData]);
 
   const handleRefresh = () => {
@@ -108,90 +107,57 @@ export default function DashboardPage() {
     fetchDashboardData();
   };
 
-  // Get time-based greeting
-  const getGreeting = () => {
-    const hour = new Date().getHours();
-    if (hour < 12) return 'Good morning';
-    if (hour < 17) return 'Good afternoon';
+  const greeting = (() => {
+    const h = new Date().getHours();
+    if (h < 12) return 'Good morning';
+    if (h < 17) return 'Good afternoon';
     return 'Good evening';
-  };
-
-  // Format date
-  const formatDate = () => {
-    return new Date().toLocaleDateString('en-US', {
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-    });
-  };
+  })();
 
   if (error) {
     return (
-      <div className="p-8 max-w-7xl mx-auto">
-        <ErrorState
-          title="Failed to load dashboard"
-          message={error}
-          onRetry={handleRefresh}
-        />
+      <div className="p-6 max-w-7xl mx-auto">
+        <ErrorState title="Failed to load dashboard" message={error} onRetry={handleRefresh} />
       </div>
     );
   }
 
   return (
-    <div className="p-8 max-w-7xl mx-auto space-y-8">
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+      className="p-6 max-w-7xl mx-auto space-y-6"
+    >
       {/* Header */}
-      <motion.div
-        initial={{ opacity: 0, y: -10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4 }}
-        className="flex items-start justify-between"
-      >
+      <div className="flex items-start justify-between">
         <div>
           <h1 className="page-title">
-            {getGreeting()}{user?.name ? `, ${user.name.split(' ')[0]}` : ''}
+            {greeting}{user?.name ? `, ${(user.name as string).split(' ')[0]}` : ''}
           </h1>
-          <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>
-            {formatDate()}
+          <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+            {new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
           </p>
         </div>
         <button
           onClick={handleRefresh}
           disabled={isRefreshing}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg transition-all hover:bg-white/5"
+          className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs transition-colors hover:bg-white/[0.04] disabled:opacity-50"
           style={{ color: 'var(--text-muted)' }}
         >
-          <RefreshCw size={18} className={isRefreshing ? 'animate-spin' : ''} />
-          <span className="text-sm">Refresh</span>
+          <RefreshCw size={14} className={isRefreshing ? 'animate-spin' : ''} />
+          Refresh
         </button>
-      </motion.div>
+      </div>
 
-      {/* Stats Grid */}
-      {isLoading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <Skeleton variant="card" count={4} />
-        </div>
-      ) : (
-        <StatsGrid stats={stats} />
-      )}
+      {/* Stats */}
+      {isLoading ? <StatsGridSkeleton /> : <StatsGrid stats={stats} />}
 
-      {/* Account Status */}
-      {isLoading ? (
-        <div className="flex gap-3">
-          <Skeleton variant="pill" count={3} />
-        </div>
-      ) : (
-        <AccountStatusRow accounts={accounts} />
-      )}
+      {/* Account status */}
+      {!isLoading && <AccountStatusRow accounts={accounts} />}
 
-      {/* Recent Activity */}
-      {isLoading ? (
-        <div className="space-y-3">
-          <Skeleton variant="row" count={5} />
-        </div>
-      ) : (
-        <RecentActivity activities={activities} />
-      )}
-    </div>
+      {/* Recent activity */}
+      {isLoading ? <ActivityListSkeleton rows={5} /> : <RecentActivity activities={activities} />}
+    </motion.div>
   );
 }

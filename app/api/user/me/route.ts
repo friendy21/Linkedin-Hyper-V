@@ -31,7 +31,7 @@ export async function GET(req: NextRequest) {
         name: user.name,
         email: user.email,
         role: user.role,
-        createdAt: user.createdAt,
+        createdAt: user.created_at,
       }
     });
   } catch (error) {

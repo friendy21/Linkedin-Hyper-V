@@ -6,7 +6,7 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
-import { Toast } from '@/components/ui/Toast';
+
 
 interface User {
   id: string;
@@ -90,9 +90,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
     setUserId(null);
     router.push('/login');
-    toast.custom((t) => (
-      <Toast type="success" title="Logged out" description="You have been signed out successfully" visible={t.visible} />
-    ));
+    toast.success('You have been signed out successfully');
   }, [router]);
 
   return (

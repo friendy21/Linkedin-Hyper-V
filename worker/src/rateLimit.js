@@ -1,3 +1,4 @@
+// FILE: worker/src/rateLimit.js
 'use strict';
 
 const { getRedis } = require('./redisClient');
@@ -11,28 +12,68 @@ const LIMITS = {
   inboxReads:      50,
 };
 
+// Hourly sub-limits to prevent burst detection
+const HOURLY_LIMITS = {
+  messagesSent:    5,
+  connectRequests: 4,
+  profileViews:    15,
+  searchQueries:   12,
+  inboxReads:      15,
+};
+
 function todayKey() {
   return new Date().toISOString().slice(0, 10); // YYYY-MM-DD UTC
 }
 
+function hourKey() {
+  // Key format: YYYY-MM-DDTHH (UTC)
+  return new Date().toISOString().slice(0, 13);
+}
+
 /**
- * Atomically increment counter and check against limit.
- * Throws if limit exceeded.
+ * Atomically increment daily and hourly counters, throw 429 if either limit exceeded.
  */
 async function checkAndIncrement(accountId, action) {
+  const redis = getRedis(); // Bug fix: was used before declaration
   const limit = LIMITS[action];
   if (limit === undefined) throw new Error(`Unknown rate-limit action: ${action}`);
 
+  const hourlyLimit = HOURLY_LIMITS[action];
+
+  // Keys
+  const dayKey   = `ratelimit:${accountId}:${action}:${todayKey()}`;
+  const hourlyKey = `ratelimit:${accountId}:${action}:hour:${hourKey()}`;
+
   const secondsUntilMidnight = 86400 - (Math.floor(Date.now() / 1000) % 86400);
 
-  // Lua script ensures atomicity: INCR then EXPIRE only if counter == 1
+  // ── Hourly check first ────────────────────────────────────────────────────
+  if (hourlyLimit !== undefined) {
+    const hourlyCurrent = await redis.eval(`
+      local count = redis.call("INCR", KEYS[1])
+      if count == 1 then
+        redis.call("EXPIRE", KEYS[1], ARGV[1])
+      end
+      return count
+    `, 1, hourlyKey, 3660);
+
+    if (hourlyCurrent > hourlyLimit) {
+      const err = new Error(
+        `Hourly limit reached: ${action} (${hourlyCurrent}/${hourlyLimit}) for account ${accountId}`
+      );
+      err.code   = 'RATE_LIMIT_EXCEEDED';
+      err.status = 429;
+      throw err;
+    }
+  }
+
+  // ── Daily check ───────────────────────────────────────────────────────────
   const current = await redis.eval(`
     local count = redis.call("INCR", KEYS[1])
     if count == 1 then
       redis.call("EXPIRE", KEYS[1], ARGV[1])
     end
     return count
-  `, 1, key, secondsUntilMidnight + 60);
+  `, 1, dayKey, secondsUntilMidnight + 60);
 
   if (current > limit) {
     const err = new Error(
@@ -51,7 +92,7 @@ async function getLimits(accountId) {
   const today   = todayKey();
   const actions = Object.keys(LIMITS);
   const keys    = actions.map((a) => `ratelimit:${accountId}:${a}:${today}`);
-  const values  = await redis.mget(...keys); // single round-trip instead of N sequential GETs
+  const values  = await redis.mget(...keys);
   return Object.fromEntries(
     actions.map((action, i) => {
       const current = parseInt(values[i] || '0', 10);
@@ -61,4 +102,4 @@ async function getLimits(accountId) {
   );
 }
 
-module.exports = { checkAndIncrement, getLimits };
+module.exports = { checkAndIncrement, getLimits, LIMITS, HOURLY_LIMITS };

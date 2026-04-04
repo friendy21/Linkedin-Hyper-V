@@ -1,263 +1,282 @@
+// FILE: components/inbox/MessageThread.tsx
 'use client';
 
-import { useRef, useEffect, useState } from 'react';
-import type { Conversation, Message } from '@/types/dashboard';
-import { Avatar } from '@/components/ui/Avatar';
-import { AccountBadge } from '@/components/ui/AccountBadge';
-import { ReplyInput } from '@/components/inbox/ReplyInput';
-import { groupByDate, timeAgo } from '@/lib/utils';
-import { sendMessage } from '@/lib/api-client';
-import { formatTimestamp, formatRelativeTime } from '@/lib/time-utils';
-import { Check, CheckCheck } from 'lucide-react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { ExternalLink, ArrowDown } from 'lucide-react';
+import { MessageThreadSkeleton } from '@/components/ui/SkeletonLoader';
+import { useWebSocket } from '@/components/providers/WebSocketProvider';
 
-interface MessageThreadProps {
-  conversation: Conversation | null;
-  onMessageSent: (updated: Conversation) => void;
+interface Message {
+  id: string;
+  text: string;
+  sentAt: string;
+  isSentByMe: boolean;
+  senderName?: string;
+  senderId?: string;
 }
 
-export function MessageThread({ conversation, onMessageSent }: MessageThreadProps) {
+interface MessageGroup {
+  isSentByMe: boolean;
+  senderName?: string;
+  messages: Message[];
+  groupTime: string;
+}
+
+interface NewMessageData {
+  conversationId: string;
+  linkedInAccountId: string;
+  participantName?: string;
+  message?: {
+    id: string;
+    text: string;
+    sentAt: string;
+    isSentByMe: boolean;
+  };
+}
+
+interface MessageThreadProps {
+  conversationId: string;
+  accountId: string;
+  participantName: string;
+  participantProfileUrl?: string | null;
+}
+
+function nameToColor(name: string): string {
+  const colors = ['#6366f1','#8b5cf6','#ec4899','#f59e0b','#10b981','#0ea5e9'];
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = name.charCodeAt(i) + ((h << 5) - h);
+  return colors[Math.abs(h) % colors.length];
+}
+
+function getInitials(name: string): string {
+  return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+}
+
+function isSameDay(a: string, b: string): boolean {
+  return new Date(a).toDateString() === new Date(b).toDateString();
+}
+
+function formatDaySeparator(dateStr: string): string {
+  const d = new Date(dateStr);
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (d.toDateString() === today.toDateString()) return 'Today';
+  if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
+  return d.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function formatTime(dateStr: string): string {
+  return new Date(dateStr).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+}
+
+function groupMessages(messages: Message[]): MessageGroup[] {
+  const groups: MessageGroup[] = [];
+  for (const msg of messages) {
+    const last = groups[groups.length - 1];
+    if (last && last.isSentByMe === msg.isSentByMe) {
+      last.messages.push(msg);
+      last.groupTime = msg.sentAt;
+    } else {
+      groups.push({
+        isSentByMe: msg.isSentByMe,
+        senderName: msg.senderName,
+        messages: [msg],
+        groupTime: msg.sentAt,
+      });
+    }
+  }
+  return groups;
+}
+
+export function MessageThread({
+  conversationId,
+  accountId,
+  participantName,
+  participantProfileUrl,
+}: MessageThreadProps) {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showScrollBtn, setShowScrollBtn] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
-  const [autoScroll, setAutoScroll] = useState(true);
-  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const { socket } = useWebSocket();
 
+  const scrollToBottom = useCallback((smooth = true) => {
+    bottomRef.current?.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto' });
+  }, []);
+
+  const fetchThread = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/messages/thread?accountId=${accountId}&chatId=${conversationId}`);
+      if (res.ok) {
+        const data: unknown = await res.json();
+        const msgs = Array.isArray(data)
+          ? data as Message[]
+          : (typeof data === 'object' && data !== null && 'messages' in data)
+          ? (data as { messages: Message[] }).messages
+          : [];
+        setMessages(msgs);
+      }
+    } finally {
+      setLoading(false);
+      requestAnimationFrame(() => scrollToBottom(false));
+    }
+  }, [accountId, conversationId, scrollToBottom]);
+
+  useEffect(() => { fetchThread(); }, [fetchThread]);
+
+  // Subscribe to new messages via socket
   useEffect(() => {
-    if (autoScroll) {
-      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [conversation?.messages, autoScroll]);
+    if (!socket) return;
 
-  // Detect if user is scrolled up
+    const handler = (data: NewMessageData) => {
+      if (data.conversationId !== conversationId) return;
+      if (data.message) {
+        setMessages(prev => [...prev, {
+          id: data.message!.id,
+          text: data.message!.text,
+          sentAt: data.message!.sentAt,
+          isSentByMe: data.message!.isSentByMe,
+        }]);
+        requestAnimationFrame(() => scrollToBottom(true));
+      } else {
+        // fetch fresh if we have no payload
+        fetchThread();
+      }
+    };
+
+    socket.on('inbox:new_message', handler);
+    return () => { socket.off('inbox:new_message', handler); };
+  }, [socket, conversationId, scrollToBottom, fetchThread]);
+
+  // Detect scroll position for "new message" button
   const handleScroll = () => {
-    if (messagesContainerRef.current) {
-      const { scrollTop, scrollHeight, clientHeight } = messagesContainerRef.current;
-      const isNearBottom = scrollHeight - scrollTop - clientHeight < 100;
-      setAutoScroll(isNearBottom);
-    }
+    const el = listRef.current;
+    if (!el) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    setShowScrollBtn(!atBottom);
   };
 
-  if (!conversation) {
-    return (
-      <div 
-        className="flex-1 flex items-center justify-center" 
-        style={{ backgroundColor: 'var(--bg-secondary, #ffffff)' }}
-      >
-        <div className="text-center px-6">
-          <div 
-            className="w-20 h-20 rounded-full mx-auto mb-4 flex items-center justify-center"
-            style={{ backgroundColor: 'var(--color-gray-100)' }}
-          >
-            <svg 
-              className="w-10 h-10" 
-              fill="none" 
-              stroke="currentColor" 
-              viewBox="0 0 24 24"
-              style={{ color: 'var(--color-gray-400)' }}
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-            </svg>
-          </div>
-          <p className="text-lg font-semibold mb-2" style={{ color: 'var(--text-primary-new, var(--text-primary))' }}>
-            Select a conversation
-          </p>
-          <p className="text-sm" style={{ color: 'var(--text-muted-new, var(--text-muted))' }}>
-            Choose from the left panel to start messaging
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  const { participant, accountId, messages } = conversation;
-  const groups = groupByDate(messages);
-
-  async function handleSend(text: string) {
-    if (!conversation) return;
-
-    // Optimistic update — show message immediately without waiting for network
-    const optimistic: Message = {
-      id:         `opt-${Date.now()}`,
-      text,
-      sentAt:     Date.now(),
-      sentByMe:   true,
-      senderName: accountId,
-    };
-    const updated: Conversation = {
-      ...conversation,
-      messages:    [...conversation.messages, optimistic],
-      lastMessage: { text, sentAt: Date.now(), sentByMe: true },
-    };
-    onMessageSent(updated);
-
-    // Fire real request in background — chatId = conversationId
-    try {
-      await sendMessage(accountId, conversation.conversationId, text);
-    } catch {
-      // Silently fail — optimistic message remains visible
-    }
-  }
-
-  // Group consecutive messages from the same sender
-  const groupedMessages = groupConsecutiveMessages(messages);
+  const groups = groupMessages(messages);
+  const avatarBg = nameToColor(participantName);
 
   return (
-    <div className="flex-1 flex flex-col" style={{ backgroundColor: 'var(--bg-secondary, #ffffff)' }}>
-      {/* Header */}
+    <div className="flex flex-col h-full relative">
+      {/* Thread header */}
       <div
-        className="flex items-center justify-between px-6 py-4 border-b"
-        style={{ 
-          borderColor: 'var(--border-color, var(--border))',
-          backgroundColor: 'var(--bg-secondary, var(--bg-panel))',
-        }}
+        className="flex items-center gap-3 px-4 py-3 flex-shrink-0"
+        style={{ borderBottom: '1px solid var(--border)', backgroundColor: 'var(--bg-surface)' }}
       >
-        <div className="flex items-center gap-3">
-          <Avatar name={participant.name} size="md" />
-          <div>
-            <h2 className="text-base font-semibold" style={{ color: 'var(--text-primary-new, var(--text-primary))' }}>
-              {participant.name}
-            </h2>
-            <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted-new, var(--text-muted))' }}>
-              {messages.length} {messages.length === 1 ? 'message' : 'messages'}
-            </p>
-          </div>
+        <div
+          className="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+          style={{ backgroundColor: avatarBg }}
+        >
+          {getInitials(participantName)}
         </div>
-        <AccountBadge name={accountId} />
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{participantName}</p>
+        </div>
+        {participantProfileUrl && (
+          <a
+            href={participantProfileUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="p-1.5 rounded-lg transition-colors hover:bg-white/[0.06]"
+            style={{ color: 'var(--text-muted)' }}
+          >
+            <ExternalLink size={15} />
+          </a>
+        )}
       </div>
 
-      {/* Messages */}
-      <div 
-        ref={messagesContainerRef}
+      {/* Message list */}
+      <div
+        ref={listRef}
+        className="flex-1 overflow-y-auto px-4 py-4 space-y-1"
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto px-6 py-6" 
-        style={{ backgroundColor: 'var(--bg-primary, var(--bg-base))' }}
+        style={{ backgroundColor: 'var(--bg-base)' }}
       >
-        {groupedMessages.map((group, groupIndex) => (
-          <MessageGroup 
-            key={groupIndex} 
-            messages={group.messages} 
-            isSentByMe={group.isSentByMe}
-            senderName={group.senderName}
-          />
-        ))}
+        {loading ? (
+          <MessageThreadSkeleton />
+        ) : messages.length === 0 ? (
+          <div className="flex items-center justify-center h-full">
+            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>No messages yet. Say hello!</p>
+          </div>
+        ) : (
+          <>
+            {groups.map((group, gi) => {
+              const prevGroup = groups[gi - 1];
+              const showDaySep = !prevGroup || !isSameDay(prevGroup.groupTime, group.messages[0].sentAt);
+              return (
+                <div key={gi}>
+                  {showDaySep && (
+                    <div className="flex items-center gap-2 my-4">
+                      <div className="flex-1 h-px" style={{ backgroundColor: 'var(--border)' }} />
+                      <span
+                        className="text-[10px] px-2 sticky top-0"
+                        style={{ color: 'var(--text-muted)' }}
+                      >
+                        {formatDaySeparator(group.messages[0].sentAt)}
+                      </span>
+                      <div className="flex-1 h-px" style={{ backgroundColor: 'var(--border)' }} />
+                    </div>
+                  )}
+                  <div className={`flex gap-2 mb-3 ${group.isSentByMe ? 'flex-row-reverse' : 'flex-row'}`}>
+                    {!group.isSentByMe && (
+                      <div
+                        className="w-8 h-8 rounded-full flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0 mt-auto"
+                        style={{ backgroundColor: avatarBg }}
+                      >
+                        {getInitials(participantName)}
+                      </div>
+                    )}
+                    <div className={`flex flex-col gap-0.5 max-w-[72%] ${group.isSentByMe ? 'items-end' : 'items-start'}`}>
+                      {group.messages.map((msg) => (
+                        <div
+                          key={msg.id}
+                          className="px-3.5 py-2.5 text-sm leading-relaxed"
+                          style={{
+                            backgroundColor: group.isSentByMe ? 'var(--accent)' : 'var(--bg-elevated)',
+                            color: 'var(--text-primary)',
+                            borderRadius: group.isSentByMe ? '1rem 1rem 0.25rem 1rem' : '1rem 1rem 1rem 0.25rem',
+                            wordBreak: 'break-word',
+                          }}
+                        >
+                          {msg.text}
+                        </div>
+                      ))}
+                      <span className="text-[10px] mt-0.5 px-1" style={{ color: 'var(--text-muted)' }}>
+                        {formatTime(group.groupTime)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </>
+        )}
         <div ref={bottomRef} />
       </div>
 
       {/* Scroll to bottom button */}
-      {!autoScroll && (
+      {showScrollBtn && !loading && (
         <button
-          onClick={() => {
-            setAutoScroll(true);
-            bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-          }}
-          className="absolute bottom-24 right-8 px-4 py-2 rounded-full shadow-lg transition-all"
+          onClick={() => scrollToBottom(true)}
+          className="absolute bottom-20 right-4 p-2 rounded-full shadow-lg transition-colors"
           style={{
-            backgroundColor: 'var(--color-primary-500)',
+            backgroundColor: 'var(--accent)',
             color: 'white',
+            border: '1px solid rgba(99,102,241,0.4)',
           }}
         >
-          ↓ New messages
+          <ArrowDown size={16} />
         </button>
       )}
-
-      <ReplyInput onSend={handleSend} />
     </div>
   );
 }
 
-// Helper function to group consecutive messages from the same sender
-function groupConsecutiveMessages(messages: Message[]): Array<{ messages: Message[]; isSentByMe: boolean; senderName: string }> {
-  const groups: Array<{ messages: Message[]; isSentByMe: boolean; senderName: string }> = [];
-  
-  messages.forEach((msg) => {
-    const lastGroup = groups[groups.length - 1];
-    
-    if (lastGroup && lastGroup.isSentByMe === msg.sentByMe && lastGroup.senderName === msg.senderName) {
-      lastGroup.messages.push(msg);
-    } else {
-      groups.push({
-        messages: [msg],
-        isSentByMe: msg.sentByMe,
-        senderName: msg.senderName,
-      });
-    }
-  });
-  
-  return groups;
-}
-
-function MessageGroup({ messages, isSentByMe, senderName }: { messages: Message[]; isSentByMe: boolean; senderName: string }) {
-  return (
-    <div className={`flex gap-3 mb-6 ${isSentByMe ? 'flex-row-reverse' : 'flex-row'}`}>
-      {/* Avatar - only show once per group */}
-      <div className="flex-shrink-0">
-        <Avatar name={senderName} size="sm" />
-      </div>
-      
-      {/* Message bubbles */}
-      <div className={`flex flex-col gap-1 max-w-[70%] ${isSentByMe ? 'items-end' : 'items-start'}`}>
-        {/* Sender name above first message */}
-        <span 
-          className="text-xs font-medium mb-1 px-2" 
-          style={{ color: 'var(--text-muted-new, var(--text-muted))' }}
-        >
-          {senderName}
-        </span>
-        
-        {messages.map((msg, index) => (
-          <MessageBubble 
-            key={msg.id} 
-            message={msg} 
-            isSentByMe={isSentByMe}
-            isLast={index === messages.length - 1}
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function MessageBubble({ message, isSentByMe, isLast }: { message: Message; isSentByMe: boolean; isLast: boolean }) {
-  const { text, sentAt } = message;
-
-  return (
-    <div className="w-full">
-      <div
-        className={`inline-block px-4 py-3 text-sm leading-relaxed transition-all ${
-          isSentByMe 
-            ? 'rounded-2xl rounded-br-sm' 
-            : 'rounded-2xl rounded-bl-sm'
-        }`}
-        style={{
-          backgroundColor: isSentByMe 
-            ? 'var(--color-primary-500, #3b82f6)' 
-            : 'var(--bg-card, var(--color-gray-100))',
-          color: isSentByMe 
-            ? '#ffffff' 
-            : 'var(--text-primary-new, var(--text-primary))',
-          maxWidth: '100%',
-          wordBreak: 'break-word',
-          boxShadow: 'var(--shadow-sm)',
-        }}
-      >
-        {text}
-      </div>
-      
-      {/* Timestamp - only show on last message of group */}
-      {isLast && (
-        <div className={`flex items-center gap-1 mt-1 px-2 ${isSentByMe ? 'justify-end' : 'justify-start'}`}>
-          <span 
-            className="text-xs" 
-            style={{ color: 'var(--text-muted-new, var(--text-muted))' }}
-          >
-            {formatRelativeTime(sentAt)}
-          </span>
-          {isSentByMe && (
-            <CheckCheck 
-              size={14} 
-              style={{ color: 'var(--color-primary-500, #3b82f6)' }} 
-            />
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
+// Expose setMessages for parent to call (optimistic append)
+export type { Message };

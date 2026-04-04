@@ -1,203 +1,73 @@
 // FILE: components/dashboard/RecentActivity.tsx
 'use client';
 
-import { useState } from 'react';
-import { MessageSquare, UserPlus, Eye, ExternalLink, ChevronDown, Search } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
-import type { ActivityEntry } from '@/types/dashboard';
+import { TimeAgo } from '@/components/ui/TimeAgo';
 
-interface RecentActivityProps {
-  activities: ActivityEntry[];
+interface ActivityEntry {
+  type: string;
+  accountId?: string;
+  targetName?: string;
+  timestamp: number;
+  messageLength?: number;
 }
 
-// Generate a stable key for activity items
-const getActivityKey = (activity: ActivityEntry, index: number): string => {
-  // Use composite key if possible, fallback to index with type/timestamp
-  return `${activity.accountId}-${activity.timestamp}-${activity.type}-${index}`;
+const TYPE_CONFIG: Record<string, { color: string; label: (e: ActivityEntry) => string }> = {
+  messageSent:    { color: 'var(--success)',    label: (e) => `Sent message to ${e.targetName || 'contact'}` },
+  connectionSent: { color: 'var(--accent)',     label: (e) => `Sent connection to ${e.targetName || 'contact'}` },
+  profileView:    { color: 'var(--warning)',    label: (e) => `Viewed ${e.targetName || 'a profile'}` },
+  sync:           { color: 'var(--text-muted)', label: ()  => 'Inbox synced' },
+  realtime_sync:  { color: 'var(--text-muted)', label: ()  => 'Realtime sync' },
 };
 
-export function RecentActivity({ activities }: RecentActivityProps) {
-  const [displayCount, setDisplayCount] = useState(10);
-  
-  const getIcon = (type: ActivityEntry['type']) => {
-    switch (type) {
-      case 'messageSent':
-        return { Icon: MessageSquare, color: '#3b82f6', bgColor: 'rgba(59, 130, 246, 0.1)' }; // Blue
-      case 'connectionSent':
-        return { Icon: UserPlus, color: '#22c55e', bgColor: 'rgba(34, 197, 94, 0.1)' }; // Green
-      case 'profileViewed':
-        return { Icon: Eye, color: '#f59e0b', bgColor: 'rgba(245, 158, 11, 0.1)' }; // Amber
-      default:
-        return { Icon: MessageSquare, color: '#3b82f6', bgColor: 'rgba(59, 130, 246, 0.1)' };
-    }
-  };
-
-  const getTypeLabel = (type: ActivityEntry['type']) => {
-    switch (type) {
-      case 'messageSent':
-        return 'Message Sent';
-      case 'connectionSent':
-        return 'Connection Request';
-      case 'profileViewed':
-        return 'Profile Viewed';
-      default:
-        return 'Activity';
-    }
-  };
-
-  const formatTimestamp = (timestamp: number) => {
-    const date = new Date(timestamp);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-
-    if (diffMins < 1) return 'just now';
-    if (diffMins < 60) return `${diffMins}m ago`;
-
-    const diffHours = Math.floor(diffMins / 60);
-    if (diffHours < 24) return `${diffHours}h ago`;
-
-    const diffDays = Math.floor(diffHours / 24);
-    if (diffDays < 7) return `${diffDays}d ago`;
-    
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  };
-
-  const formatFullTimestamp = (timestamp: number) => {
-    return new Date(timestamp).toLocaleString('en-US', {
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  };
-
-  const displayedActivities = activities.slice(0, displayCount);
-  const hasMore = activities.length > displayCount;
-
-  if (activities.length === 0) {
-    return (
-      <div
-        className="rounded-xl border p-8 text-center"
-        style={{ background: 'var(--bg-panel)', borderColor: 'var(--border)' }}
-      >
-        <div className="flex flex-col items-center gap-4">
-          {/* Empty state illustration */}
-          <div 
-            className="w-16 h-16 rounded-full flex items-center justify-center"
-            style={{ background: 'var(--bg-card)' }}
-          >
-            <Search size={32} style={{ color: 'var(--text-muted)' }} />
-          </div>
-          <div>
-            <p className="font-medium" style={{ color: 'var(--text-primary)' }}>
-              No activity yet
-            </p>
-            <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>
-              Add a LinkedIn account to get started
-            </p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
+function Dot({ color }: { color: string }) {
   return (
-    <div
-      className="rounded-xl border overflow-hidden"
-      style={{ background: 'var(--bg-panel)', borderColor: 'var(--border)' }}
-    >
-      <div className="p-4 border-b flex items-center justify-between" style={{ borderColor: 'var(--border)' }}>
-        <h3 className="font-semibold" style={{ color: 'var(--text-primary)' }}>
-          Recent Activity
-        </h3>
-        <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
-          {activities.length} total
-        </span>
-      </div>
-      <div className="divide-y" style={{ borderColor: 'var(--border)' }}>
-        <AnimatePresence>
-          {displayedActivities.map((activity, index) => {
-            const { Icon, color, bgColor } = getIcon(activity.type);
-            const activityKey = getActivityKey(activity, index);
-            
+    <span
+      className="w-2.5 h-2.5 rounded-full flex-shrink-0 mt-1"
+      style={{ backgroundColor: color }}
+    />
+  );
+}
+
+function EmptyState() {
+  return (
+    <div className="flex flex-col items-center gap-3 py-10 text-center">
+      <svg width="40" height="40" viewBox="0 0 40 40" fill="none" aria-hidden="true">
+        <circle cx="20" cy="20" r="18" stroke="var(--border-strong)" strokeWidth="2" />
+        <path d="M13 20h14M20 13v14" stroke="var(--text-muted)" strokeWidth="2" strokeLinecap="round" />
+      </svg>
+      <p className="text-sm" style={{ color: 'var(--text-muted)' }}>No activity yet</p>
+    </div>
+  );
+}
+
+export function RecentActivity({ activities }: { activities: ActivityEntry[] }) {
+  return (
+    <div className="rounded-2xl p-5" style={{ backgroundColor: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
+      <h2 className="text-sm font-semibold mb-4" style={{ color: 'var(--text-primary)' }}>Recent Activity</h2>
+      {activities.length === 0 ? (
+        <EmptyState />
+      ) : (
+        <div className="flex flex-col gap-1">
+          {activities.slice(0, 10).map((entry, i) => {
+            const cfg = TYPE_CONFIG[entry.type] ?? TYPE_CONFIG.sync;
             return (
-              <motion.div
-                key={activityKey}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                transition={{ duration: 0.2, delay: index * 0.03 }}
-                className="p-4 flex items-center gap-4 hover:bg-white/5 transition-colors cursor-default group"
-              >
-                <div
-                  className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0"
-                  style={{ background: bgColor }}
-                >
-                  <Icon size={18} style={{ color }} />
-                </div>
+              <div key={i} className="flex items-start gap-3 py-2.5" style={{ borderTop: i > 0 ? '1px solid var(--border)' : 'none' }}>
+                <Dot color={cfg.color} />
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-                      {getTypeLabel(activity.type)}
-                    </span>
-                    <span 
-                      className="text-xs px-2 py-0.5 rounded max-w-[150px] truncate" 
-                      style={{ background: 'var(--bg-card)', color: 'var(--text-muted)' }}
-                      title={activity.accountId}
+                  {entry.accountId && (
+                    <span
+                      className="text-[10px] font-medium px-1.5 py-0.5 rounded mr-2"
+                      style={{ backgroundColor: 'var(--bg-surface)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}
                     >
-                      {activity.accountId.slice(0, 8)}...
+                      {entry.accountId.slice(-6)}
                     </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <p className="text-sm truncate" style={{ color: 'var(--text-secondary)' }}>
-                      {activity.targetName}
-                    </p>
-                    {activity.targetProfileUrl && (
-                      <a
-                        href={activity.targetProfileUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
-                        style={{ color: 'var(--accent)' }}
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <ExternalLink size={14} />
-                      </a>
-                    )}
-                  </div>
-                  {activity.message && (
-                    <p className="text-xs mt-1 truncate" style={{ color: 'var(--text-muted)' }}>
-                      {activity.message}
-                    </p>
                   )}
+                  <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>{cfg.label(entry)}</span>
                 </div>
-                <div 
-                  className="text-xs flex-shrink-0" 
-                  style={{ color: 'var(--text-muted)' }}
-                  title={formatFullTimestamp(activity.timestamp)}
-                >
-                  {formatTimestamp(activity.timestamp)}
-                </div>
-              </motion.div>
+                <TimeAgo timestamp={new Date(entry.timestamp).toISOString()} className="text-[10px] flex-shrink-0 mt-0.5" />
+              </div>
             );
           })}
-        </AnimatePresence>
-      </div>
-      
-      {/* Load More Button */}
-      {hasMore && (
-        <div className="p-4 border-t" style={{ borderColor: 'var(--border)' }}>
-          <button
-            onClick={() => setDisplayCount(prev => prev + 10)}
-            className="w-full py-2 rounded-lg text-sm font-medium transition-all hover:bg-white/5 flex items-center justify-center gap-2"
-            style={{ color: 'var(--text-muted)' }}
-          >
-            <ChevronDown size={16} />
-            Load more ({activities.length - displayCount} remaining)
-          </button>
         </div>
       )}
     </div>

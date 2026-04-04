@@ -1,211 +1,262 @@
+// FILE: components/accounts/AddAccountModal.tsx
 'use client';
 
-// FILE: components/accounts/AddAccountModal.tsx
-// Redesigned: no cookie paste. Single button that calls POST /api/linkedin-accounts/connect
-// which triggers a real Playwright login window on the server.
-
 import { useState } from 'react';
-import { X, Linkedin, Loader2, CheckCircle2, AlertCircle, ExternalLink } from 'lucide-react';
+import * as Dialog from '@radix-ui/react-dialog';
+import { X, ChevronLeft } from 'lucide-react';
+import { Button, Spinner } from '@/components/ui/Button';
+import { CookieInstructions } from './CookieInstructions';
+import { toast } from '@/components/ui/Toast';
 
-interface Props {
+interface AddAccountModalProps {
   open: boolean;
-  onClose: () => void;
-  onSuccess: () => void;
-  existingAccounts?: string[];
+  onOpenChange: (open: boolean) => void;
+  onSuccess?: () => void;
 }
 
-type Step = 'idle' | 'connecting' | 'waiting' | 'success' | 'error';
+const PROXY_REGEX = /^https?:\/\/[^:]+:[^@]+@[^:]+:\d+$/;
 
-export function AddAccountModal({ open, onClose, onSuccess }: Props) {
-  const [step, setStep] = useState<Step>('idle');
-  const [error, setError] = useState<string | null>(null);
+type StepState = {
+  name: string;
+  proxyUrl: string;
+  cookieJson: string;
+};
 
-  if (!open) return null;
+type VerifyResult =
+  | { ok: true; accountId: string }
+  | { ok: false; error: string };
 
-  const handleConnect = async () => {
-    setStep('connecting');
-    setError(null);
+export function AddAccountModal({ open, onOpenChange, onSuccess }: AddAccountModalProps) {
+  const [step, setStep] = useState(0);
+  const [fields, setFields] = useState<StepState>({ name: '', proxyUrl: '', cookieJson: '' });
+  const [errors, setErrors] = useState<Partial<StepState>>({});
+  const [verifying, setVerifying] = useState(false);
+  const [verifyResult, setVerifyResult] = useState<VerifyResult | null>(null);
 
+  const resetModal = () => {
+    setStep(0);
+    setFields({ name: '', proxyUrl: '', cookieJson: '' });
+    setErrors({});
+    setVerifyResult(null);
+  };
+
+  const handleOpenChange = (v: boolean) => {
+    if (!v) resetModal();
+    onOpenChange(v);
+  };
+
+  const validateStep0 = () => {
+    const errs: Partial<StepState> = {};
+    if (!fields.name.trim()) errs.name = 'Display name is required';
+    if (fields.proxyUrl && !PROXY_REGEX.test(fields.proxyUrl)) {
+      errs.proxyUrl = 'Must be http(s)://user:pass@host:port';
+    }
+    setErrors(errs);
+    return Object.keys(errs).length === 0;
+  };
+
+  const validateStep2 = () => {
     try {
-      // Give a moment before showing the "waiting" state so the user understands
-      setTimeout(() => setStep('waiting'), 800);
-
-      const res = await fetch('/api/linkedin-accounts/connect', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.error || 'Connection failed');
+      const parsed: unknown = JSON.parse(fields.cookieJson);
+      if (!Array.isArray(parsed) || parsed.length === 0) {
+        setErrors({ cookieJson: 'Must be a non-empty JSON array of cookie objects' });
+        return false;
       }
-
-      setStep('success');
-      setTimeout(() => {
-        onSuccess();
-        handleClose();
-      }, 2000);
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Connection failed';
-      setError(message);
-      setStep('error');
+      setErrors({});
+      return true;
+    } catch {
+      setErrors({ cookieJson: 'Invalid JSON — paste the cookie array exactly' });
+      return false;
     }
   };
 
-  const handleClose = () => {
-    if (step === 'connecting' || step === 'waiting') return; // don't close during active session
-    setStep('idle');
-    setError(null);
-    onClose();
+  const handleVerifyAndSave = async () => {
+    if (!validateStep2()) return;
+    setVerifying(true);
+    setVerifyResult(null);
+    try {
+      const res = await fetch('/api/accounts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          displayName: fields.name,
+          proxyUrl: fields.proxyUrl || null,
+          cookies: JSON.parse(fields.cookieJson),
+        }),
+      });
+      const data: unknown = await res.json();
+      if (!res.ok) {
+        const msg = typeof data === 'object' && data !== null && 'error' in data
+          ? String((data as Record<string, unknown>).error)
+          : 'Failed to save account';
+        setVerifyResult({ ok: false, error: msg });
+      } else {
+        const accountId = typeof data === 'object' && data !== null && 'id' in data
+          ? String((data as Record<string, unknown>).id)
+          : '';
+        setVerifyResult({ ok: true, accountId });
+        toast.success('Account added successfully!');
+        onSuccess?.();
+        setTimeout(() => handleOpenChange(false), 1200);
+      }
+    } catch {
+      setVerifyResult({ ok: false, error: 'Network error — please try again' });
+    } finally {
+      setVerifying(false);
+    }
   };
 
+  const inputBase = `
+    w-full px-3 py-2.5 rounded-xl text-sm text-[--text-primary] placeholder:text-[--text-muted]
+    bg-[--bg-elevated] border transition-colors outline-none focus:border-[--accent]
+  `;
+
+  const steps = ['Details', 'Instructions', 'Cookies'];
+
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}
-      onClick={(e) => { if (e.target === e.currentTarget) handleClose(); }}
-    >
-      <div
-        className="relative w-full max-w-md rounded-2xl p-8 shadow-2xl"
-        style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}
-      >
-        {/* Close button */}
-        {step !== 'connecting' && step !== 'waiting' && (
-          <button
-            onClick={handleClose}
-            className="absolute top-4 right-4 p-1 rounded-lg transition-colors"
-            style={{ color: 'var(--text-muted)' }}
-          >
-            <X size={20} />
-          </button>
-        )}
-
-        {/* ── Idle: prompt user ────────────────────────────────── */}
-        {(step === 'idle' || step === 'error') && (
-          <div className="text-center">
-            <div
-              className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6"
-              style={{ background: '#0A66C2' }}
-            >
-              <Linkedin size={32} color="white" />
+    <Dialog.Root open={open} onOpenChange={handleOpenChange}>
+      <Dialog.Portal>
+        <Dialog.Overlay
+          className="fixed inset-0 z-40"
+          style={{ backgroundColor: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}
+        />
+        <Dialog.Content
+          className="fixed z-50 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg rounded-2xl p-6 shadow-2xl focus:outline-none"
+          style={{ backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-strong)' }}
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <Dialog.Title className="text-base font-semibold" style={{ color: 'var(--text-primary)' }}>
+                Add LinkedIn Account
+              </Dialog.Title>
+              <Dialog.Description className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                Step {step + 1} of {steps.length}
+              </Dialog.Description>
             </div>
-
-            <h2 className="text-2xl font-bold mb-2" style={{ color: 'var(--text-primary)' }}>
-              Connect LinkedIn Account
-            </h2>
-            <p className="text-sm mb-6" style={{ color: 'var(--text-muted)' }}>
-              A real LinkedIn login window will open on the server. Log in with your LinkedIn
-              credentials there — we never see or touch them.
-            </p>
-
-            {error && (
-              <div
-                className="flex items-start gap-3 p-4 rounded-xl mb-6 text-left"
-                style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)' }}
+            <Dialog.Close asChild>
+              <button
+                className="p-1.5 rounded-lg transition-colors hover:bg-white/[0.06]"
+                style={{ color: 'var(--text-muted)' }}
               >
-                <AlertCircle size={18} className="mt-0.5 shrink-0" style={{ color: '#ef4444' }} />
-                <p className="text-sm" style={{ color: '#ef4444' }}>{error}</p>
-              </div>
-            )}
+                <X size={18} />
+              </button>
+            </Dialog.Close>
+          </div>
 
-            <div
-              className="flex items-start gap-3 p-4 rounded-xl mb-6 text-left"
-              style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}
-            >
-              <ExternalLink size={16} className="mt-0.5 shrink-0" style={{ color: 'var(--accent)' }} />
+          {/* Step dots */}
+          <div className="flex gap-1.5 mb-6">
+            {steps.map((_, i) => (
+              <div
+                key={i}
+                className="h-1.5 flex-1 rounded-full transition-colors"
+                style={{ backgroundColor: i <= step ? 'var(--accent)' : 'var(--border-strong)' }}
+              />
+            ))}
+          </div>
+
+          {/* Step 0: Details */}
+          {step === 0 && (
+            <div className="space-y-4">
               <div>
-                <p className="text-sm font-medium mb-1" style={{ color: 'var(--text-primary)' }}>
-                  How it works
-                </p>
-                <ol className="text-xs space-y-1" style={{ color: 'var(--text-muted)' }}>
-                  <li>1. Click the button below</li>
-                  <li>2. A LinkedIn login window opens automatically</li>
-                  <li>3. Log in with your LinkedIn credentials</li>
-                  <li>4. Your account is connected automatically on success</li>
-                </ol>
+                <label className="label-xs block mb-1.5">Display Name</label>
+                <input
+                  id="account-name"
+                  type="text"
+                  value={fields.name}
+                  onChange={(e) => setFields(f => ({ ...f, name: e.target.value }))}
+                  placeholder="e.g. John Smith (Sales)"
+                  className={inputBase}
+                  style={{ borderColor: errors.name ? 'rgba(239,68,68,0.5)' : 'var(--border-strong)' }}
+                />
+                {errors.name && <p className="text-xs mt-1" style={{ color: 'var(--danger)' }}>{errors.name}</p>}
+              </div>
+              <div>
+                <label className="label-xs block mb-1.5">Proxy URL <span style={{ color: 'var(--text-muted)' }}>(optional)</span></label>
+                <input
+                  id="account-proxy"
+                  type="text"
+                  value={fields.proxyUrl}
+                  onChange={(e) => setFields(f => ({ ...f, proxyUrl: e.target.value }))}
+                  placeholder="http://user:pass@host:port"
+                  className={inputBase}
+                  style={{ borderColor: errors.proxyUrl ? 'rgba(239,68,68,0.5)' : 'var(--border-strong)' }}
+                />
+                {errors.proxyUrl && <p className="text-xs mt-1" style={{ color: 'var(--danger)' }}>{errors.proxyUrl}</p>}
               </div>
             </div>
+          )}
 
-            <button
-              onClick={handleConnect}
-              className="w-full py-3 rounded-xl font-semibold text-white transition-all hover:opacity-90 flex items-center justify-center gap-2"
-              style={{ background: '#0A66C2' }}
-            >
-              <Linkedin size={20} />
-              {error ? 'Try Again' : 'Connect LinkedIn Account'}
-            </button>
-          </div>
-        )}
-
-        {/* ── Connecting: dispatching job ──────────────────────── */}
-        {step === 'connecting' && (
-          <div className="text-center py-4">
-            <Loader2 size={48} className="animate-spin mx-auto mb-4" style={{ color: '#0A66C2' }} />
-            <h3 className="text-lg font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>
-              Starting up…
-            </h3>
-            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-              Launching the LinkedIn login window
-            </p>
-          </div>
-        )}
-
-        {/* ── Waiting: LinkedIn window is open ────────────────── */}
-        {step === 'waiting' && (
-          <div className="text-center py-4">
-            <div
-              className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6 relative"
-              style={{ background: '#0A66C2' }}
-            >
-              <Linkedin size={32} color="white" />
-              <span
-                className="absolute -top-1 -right-1 w-5 h-5 rounded-full animate-ping"
-                style={{ background: '#22c55e' }}
-              />
-              <span
-                className="absolute -top-1 -right-1 w-5 h-5 rounded-full"
-                style={{ background: '#22c55e' }}
-              />
+          {/* Step 1: Cookie instructions */}
+          {step === 1 && (
+            <div className="max-h-80 overflow-y-auto pr-1">
+              <CookieInstructions />
             </div>
+          )}
 
-            <h3 className="text-xl font-bold mb-2" style={{ color: 'var(--text-primary)' }}>
-              LinkedIn window is open
-            </h3>
-            <p className="text-sm mb-1" style={{ color: 'var(--text-muted)' }}>
-              Log in with your LinkedIn credentials in the browser window that just opened.
-            </p>
-            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-              This window will close automatically after you log in. You have up to 5 minutes.
-            </p>
-
-            <div className="mt-6 flex items-center justify-center gap-2">
-              <Loader2 size={16} className="animate-spin" style={{ color: 'var(--accent)' }} />
-              <span className="text-sm" style={{ color: 'var(--text-muted)' }}>
-                Waiting for login…
-              </span>
+          {/* Step 2: Paste cookies */}
+          {step === 2 && (
+            <div className="space-y-4">
+              <div>
+                <label className="label-xs block mb-1.5">Cookie JSON</label>
+                <textarea
+                  id="account-cookies"
+                  rows={7}
+                  value={fields.cookieJson}
+                  onChange={(e) => setFields(f => ({ ...f, cookieJson: e.target.value }))}
+                  placeholder='[{"name":"li_at","value":"AQE...","domain":".linkedin.com",...}]'
+                  className={`${inputBase} resize-none font-mono text-xs`}
+                  style={{ borderColor: errors.cookieJson ? 'rgba(239,68,68,0.5)' : 'var(--border-strong)' }}
+                />
+                {errors.cookieJson && <p className="text-xs mt-1" style={{ color: 'var(--danger)' }}>{errors.cookieJson}</p>}
+              </div>
+              {verifyResult && (
+                <div
+                  className="px-3 py-2.5 rounded-lg text-xs"
+                  style={{
+                    backgroundColor: verifyResult.ok ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
+                    border: `1px solid ${verifyResult.ok ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'}`,
+                    color: verifyResult.ok ? 'var(--success)' : 'var(--danger)',
+                  }}
+                >
+                  {verifyResult.ok ? `✓ Account saved successfully` : `✗ ${verifyResult.error}`}
+                </div>
+              )}
             </div>
-          </div>
-        )}
+          )}
 
-        {/* ── Success ──────────────────────────────────────────── */}
-        {step === 'success' && (
-          <div className="text-center py-4">
-            <div
-              className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4"
-              style={{ background: 'rgba(34,197,94,0.1)' }}
-            >
-              <CheckCircle2 size={40} style={{ color: '#22c55e' }} />
-            </div>
-            <h3 className="text-xl font-bold mb-2" style={{ color: 'var(--text-primary)' }}>
-              Account Connected!
-            </h3>
-            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-              Your LinkedIn account has been connected successfully.
-            </p>
+          {/* Footer */}
+          <div className="flex gap-2 mt-6">
+            {step > 0 && (
+              <Button variant="ghost" size="md" leftIcon={<ChevronLeft size={15} />} onClick={() => setStep(s => s - 1)}>
+                Back
+              </Button>
+            )}
+            <div className="flex-1" />
+            {step < 2 ? (
+              <Button
+                variant="primary"
+                size="md"
+                onClick={() => {
+                  if (step === 0 && !validateStep0()) return;
+                  setStep(s => s + 1);
+                }}
+              >
+                Continue
+              </Button>
+            ) : (
+              <Button
+                variant="primary"
+                size="md"
+                loading={verifying}
+                onClick={handleVerifyAndSave}
+              >
+                Verify & Save
+              </Button>
+            )}
           </div>
-        )}
-      </div>
-    </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }

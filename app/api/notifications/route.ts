@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth/next';
-import { authOptions } from '@/lib/auth/nextauth';
+import { getSession } from '@/lib/auth/session';
 import { forwardToBackend } from '@/lib/server/backend-api';
 
 // GET /api/notifications — list notifications for the current user
 // Supports ?limit=50&offset=0 pagination
 export async function GET(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
+  const session = await getSession(req);
+  if (!session?.userId) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -20,6 +19,6 @@ export async function GET(req: NextRequest) {
     method:  'GET',
     path:    '/notifications',
     query,
-    headers: { 'x-user-id': session.user.id },
+    headers: { 'x-user-id': session.userId },
   });
 }

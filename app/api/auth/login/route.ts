@@ -7,8 +7,8 @@ import bcrypt from 'bcrypt';
 
 // Validation schema
 const loginSchema = z.object({
-  email: z.string().email('Invalid email format').min(1).max(254),
-  password: z.string().min(8).max(128),
+  email: z.string().min(1).max(254),
+  password: z.string().min(1).max(128),
 });
 
 // Type for login request
@@ -19,6 +19,19 @@ interface LoginRequestBody {
 
 export async function POST(req: NextRequest) {
   try {
+    // Parse and validate request body
+    const body: unknown = await req.json();
+    const parsed = loginSchema.safeParse(body);
+
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: 'Invalid input', details: parsed.error.format() },
+        { status: 400 }
+      );
+    }
+
+    const { email, password } = parsed.data as LoginRequestBody;
+
     // Rate limiting: 5 attempts per 15 minutes per IP
     const ip = getClientIp(req);
     const { success: rateLimitOk, reset } = await rateLimit(`login:${ip}`, {
@@ -37,19 +50,6 @@ export async function POST(req: NextRequest) {
         }
       );
     }
-
-    // Parse and validate request body
-    const body: unknown = await req.json();
-    const parsed = loginSchema.safeParse(body);
-
-    if (!parsed.success) {
-      return NextResponse.json(
-        { error: 'Invalid input', details: parsed.error.format() },
-        { status: 400 }
-      );
-    }
-
-    const { email, password } = parsed.data as LoginRequestBody;
     
     const user = await getUserByEmail(email);
     if (!user) {
