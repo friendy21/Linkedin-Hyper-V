@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createToken } from "@/lib/auth/jwt";
+import { signToken } from "@/lib/auth/jwt";
 
 export async function POST(request: NextRequest) {
   try {
@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Create JWT token
-    const token = await createToken({
+    const token = await signToken({
       userId: "admin",
       email: "admin@localhost",
       role: "superadmin",
