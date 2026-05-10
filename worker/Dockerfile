@@ -2,7 +2,7 @@ FROM mcr.microsoft.com/playwright:v1.52.0-jammy
 
 WORKDIR /app
 
-# Install real Google Chrome Stable (NOT Chromium — LinkedIn detects it)
+# Install real Google Chrome Stable (not Chromium)
 RUN apt-get update && apt-get install -y wget gnupg \
   && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
   && echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" \
@@ -10,28 +10,23 @@ RUN apt-get update && apt-get install -y wget gnupg \
   && apt-get update && apt-get install -y google-chrome-stable \
   && rm -rf /var/lib/apt/lists/*
 
-# Xvfb for virtual display (headed mode without a real screen)
-RUN apt-get update && apt-get install -y xvfb x11vnc novnc websockify \
+# Xvfb for virtual display
+RUN apt-get update && apt-get install -y xvfb x11-utils \
   && rm -rf /var/lib/apt/lists/*
 
-# Install Node.js dependencies
-COPY package.json ./
-RUN npm install
+COPY package*.json ./
+RUN npm install --omit=dev
 
-# Copy prisma schema
-COPY prisma ./prisma/
-RUN npx prisma generate
+# Prisma client must be generated inside the image.
+COPY prisma/ ./prisma/
+COPY prisma.config.ts ./prisma.config.ts
+RUN npx prisma generate --schema=prisma/schema.prisma
 
-# Copy source and build
-COPY . .
-RUN npm run build
+COPY entrypoint.sh ./
+RUN chmod +x entrypoint.sh
 
-# Create profiles directory
-RUN mkdir -p /app/profiles
+COPY src/ ./src/
 
 EXPOSE 3001
 
-ENV CHROME_PATH=/usr/bin/google-chrome
-ENV DISPLAY=:99
-
-CMD ["npm", "start"]
+ENTRYPOINT ["./entrypoint.sh"]

@@ -11,7 +11,6 @@ const SESSION_MAX_AGE = parseInt(process.env.SESSION_MAX_AGE || '86400', 10);
 export interface JWTPayload {
   authenticated: boolean;
   userId?: string;
-  email?: string;
   role?: string;
   iat: number;
   exp: number;

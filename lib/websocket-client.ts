@@ -3,11 +3,12 @@
 
 import { io, Socket } from 'socket.io-client';
 
-type EventCallback = (data: any) => void;
+type SocketEventPayload = unknown;
+type ListenerCallback = (data: SocketEventPayload) => void;
 
 export class WebSocketClient {
   private socket: Socket | null = null;
-  private listeners: Map<string, Set<EventCallback>> = new Map();
+  private listeners: Map<string, Set<ListenerCallback>> = new Map();
   private url: string = '';
   private reconnectAttempts: number = 0;
   private maxReconnectDelay: number = 30000; // 30 seconds
@@ -17,14 +18,29 @@ export class WebSocketClient {
     return this._isConnected;
   }
 
+  private normalizeSocketOrigin(rawUrl: string): string {
+    try {
+      const parsed = new URL(rawUrl);
+      // Socket.IO expects HTTP(S) origin; WS(S) can cause client-side edge-case failures.
+      if (parsed.protocol === 'ws:') parsed.protocol = 'http:';
+      if (parsed.protocol === 'wss:') parsed.protocol = 'https:';
+      return parsed.origin;
+    } catch {
+      return rawUrl;
+    }
+  }
+
   connect(url: string): void {
     if (!url || typeof window === 'undefined') return;
     
-    this.url = url;
+    const origin = this.normalizeSocketOrigin(url);
+    this.url = origin;
 
     try {
-      this.socket = io(url, {
+      this.socket = io(origin, {
+        path: '/socket.io',
         transports: ['websocket', 'polling'],
+        withCredentials: true,
         reconnection: true,
         reconnectionDelay: 1000,
         reconnectionDelayMax: this.maxReconnectDelay,
@@ -45,7 +61,9 @@ export class WebSocketClient {
       });
 
       this.socket.on('connect_error', (error) => {
-        console.error('[WebSocket] Connection error:', error.message);
+        // In dev mode this can happen during worker restarts or transport fallback.
+        // Use warn instead of error to avoid noisy Next.js error overlays.
+        console.warn('[WebSocket] Connection warning:', error.message);
         this.reconnectAttempts++;
         this.notifyStatusListeners('reconnecting');
       });
@@ -84,18 +102,19 @@ export class WebSocketClient {
     }
   }
 
-  on(event: string, callback: EventCallback): () => void {
+  on<T = unknown>(event: string, callback: (data: T) => void): () => void {
     if (!this.listeners.has(event)) {
       this.listeners.set(event, new Set());
     }
-    
-    this.listeners.get(event)!.add(callback);
+
+    const wrapped = callback as ListenerCallback;
+    this.listeners.get(event)!.add(wrapped);
 
     // Return unsubscribe function
     return () => {
       const callbacks = this.listeners.get(event);
       if (callbacks) {
-        callbacks.delete(callback);
+        callbacks.delete(wrapped);
         if (callbacks.size === 0) {
           this.listeners.delete(event);
         }
@@ -103,27 +122,16 @@ export class WebSocketClient {
     };
   }
 
-  emit(event: string, data: any): void {
+  emit(event: string, data: SocketEventPayload): void {
     if (this.socket && this.socket.connected) {
       this.socket.emit(event, data);
     }
   }
 
-  /** Join the user-scoped room for real-time events. Call this after auth. */
-  joinUserRoom(userId: string): void {
-    this.emit('join:user', userId);
-  }
-
-  leaveUserRoom(userId: string): void {
-    this.emit('leave:user', userId);
-  }
-
-  /** @deprecated Use joinUserRoom */
   joinAccountRoom(accountId: string): void {
     this.emit('join:account', accountId);
   }
 
-  /** @deprecated Use leaveUserRoom */
   leaveAccountRoom(accountId: string): void {
     this.emit('leave:account', accountId);
   }

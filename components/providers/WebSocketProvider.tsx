@@ -1,103 +1,91 @@
 // FILE: components/providers/WebSocketProvider.tsx
-// Connects to the worker WebSocket, joins the user's room for scoped events.
 'use client';
 
-import { createContext, useContext, useEffect, useState, useRef } from 'react';
-import { io, Socket } from 'socket.io-client';
+import { useEffect } from 'react';
+import { wsClient } from '@/lib/websocket-client';
+import { useAuth } from '@/components/providers/AuthProvider';
 import toast from 'react-hot-toast';
 
-interface WebSocketContextType {
-  socket: Socket | null;
-  isConnected: boolean;
-}
+type StatusChangedPayload = {
+  status?: 'connected' | 'disconnected' | 'reconnecting';
+};
 
-const WebSocketContext = createContext<WebSocketContextType>({ socket: null, isConnected: false });
+type InboxNewMessagePayload = {
+  senderName?: string;
+  message?: {
+    senderName?: string;
+  };
+};
 
-export function useWebSocket() {
-  return useContext(WebSocketContext);
-}
-
-/**
- * Connects to the worker Socket.IO server and joins the authenticated user's room.
- * Pass userId from your auth context / session to scope real-time events correctly.
- */
-export function WebSocketProvider({
-  children,
-  userId,
-}: {
-  children: React.ReactNode;
-  userId?: string | null;
-}) {
-  const [isConnected, setIsConnected] = useState(false);
-  const socketRef = useRef<Socket | null>(null);
+export function WebSocketProvider({ children }: { children: React.ReactNode }) {
+  const { isAuthenticated, isLoading } = useAuth();
 
   useEffect(() => {
+    // Avoid opening sockets for unauthenticated pages (login/register).
+    if (isLoading || !isAuthenticated) {
+      wsClient.disconnect();
+      return;
+    }
+
+    // Use worker API URL (default: localhost:3001)
     const url = process.env.NEXT_PUBLIC_WS_URL || 'http://localhost:3001';
 
-    const socket = io(url, {
-      transports: ['websocket', 'polling'],
-      reconnection: true,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 30_000,
-      reconnectionAttempts: Infinity,
-    });
+    console.log('[WebSocket] Connecting to:', url);
 
-    socketRef.current = socket;
+    // Connect to WebSocket
+    wsClient.connect(url);
 
-    socket.on('connect', () => {
-      console.log('[WebSocket] Connected');
-      setIsConnected(true);
-
-      // Join the user-specific room for scoped events
-      if (userId) {
-        socket.emit('join:user', userId);
-        console.log(`[WebSocket] Joined room: user:${userId}`);
+    // Set up connection status listener
+    const unsubscribeStatus = wsClient.on('status:changed', (data: StatusChangedPayload) => {
+      if (data.status === 'connected') {
+        toast.success('Connected to real-time updates', { duration: 2000 });
+      } else if (data.status === 'disconnected') {
+        toast.error('Disconnected from real-time updates', { duration: 2000 });
       }
     });
 
-    socket.on('disconnect', (reason) => {
-      console.log('[WebSocket] Disconnected:', reason);
-      setIsConnected(false);
+    // Set up global event handlers
+    const unsubscribeAccountStatus = wsClient.on('account:status', (data) => {
+      console.log('[WebSocket] Account status changed:', data);
+      // Trigger global refresh if needed
     });
 
-    socket.on('connect_error', (err) => {
-      console.error('[WebSocket] Connection error:', err.message);
-    });
+    const unsubscribeNewMessage = wsClient.on('inbox:new_message', (data: InboxNewMessagePayload) => {
+      console.log('[WebSocket] New message received:', data);
 
-    // Re-join room after reconnect
-    socket.on('reconnect', () => {
-      if (userId) {
-        socket.emit('join:user', userId);
+      const senderName = data.message?.senderName || data.senderName || 'Someone';
+      if (senderName !== '__self__' && !senderName.includes('account')) {
+        toast.success(`New message from ${senderName}`, {
+          icon: 'MSG',
+          duration: 4000,
+        });
       }
     });
 
-    // Global toast for new messages (individual pages handle their own updates)
-    socket.on('inbox:new_message', (data) => {
-      const senderName = data.participantName || data.senderName || 'Someone';
-      toast.success(`New message from ${senderName}`, { icon: '💬', duration: 4000 });
+    const unsubscribeInboxUpdate = wsClient.on('inbox:updated', (data) => {
+      console.log('[WebSocket] Inbox updated:', data);
+      // Pages will handle their own inbox updates
     });
 
-    socket.on('session:expired', (data) => {
-      toast.error('A LinkedIn session expired — reconnect in Accounts.', {
-        icon: '⚠️',
-        duration: 8000,
-      });
-      console.warn('[WebSocket] Session expired for account:', data.linkedInAccountId);
+    const unsubscribeRateLimit = wsClient.on('rate_limit:updated', (data) => {
+      console.log('[WebSocket] Rate limit updated:', data);
     });
 
-    socket.on('connection:new', (data) => {
-      toast.success(`New connection: ${data.connection?.name || 'Someone'}`, { icon: '🤝', duration: 4000 });
+    const unsubscribeConnected = wsClient.on('connected', (data) => {
+      console.log('[WebSocket] Connection confirmed:', data);
     });
 
+    // Cleanup on unmount
     return () => {
-      socket.disconnect();
-      socketRef.current = null;
+      unsubscribeStatus();
+      unsubscribeAccountStatus();
+      unsubscribeNewMessage();
+      unsubscribeInboxUpdate();
+      unsubscribeRateLimit();
+      unsubscribeConnected();
+      wsClient.disconnect();
     };
-  }, [userId]);
+  }, [isAuthenticated, isLoading]);
 
-  return (
-    <WebSocketContext.Provider value={{ socket: socketRef.current, isConnected }}>
-      {children}
-    </WebSocketContext.Provider>
-  );
+  return <>{children}</>;
 }

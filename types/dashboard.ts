@@ -4,13 +4,8 @@
 export interface Account {
   id: string;
   displayName: string;
-  linkedinProfileId?: string | null;
   isActive: boolean;
-  status?: 'active' | 'expired' | 'pending';
   lastSeen: string | null;
-  lastSyncedAt?: string | null;
-  sessionExpiresAt?: string | null;
-  createdAt?: string;
 }
 
 export interface Message {
@@ -38,11 +33,16 @@ export interface Conversation {
 }
 
 export interface ActivityEntry {
-  type: 'messageSent' | 'connectionSent' | 'profileViewed';
+  type: string;
   accountId: string;
-  targetName: string;
-  targetProfileUrl: string;
+  targetName?: string;
+  targetProfileUrl?: string;
   message?: string;
+  stats?: {
+    conversations?: number;
+    newMessages?: number;
+    errors?: number;
+  };
   timestamp: number;   // unix ms
 }
 
@@ -60,12 +60,4 @@ export interface JobResult {
   error?: string;
 }
 
-export type ActivityTab = 'all' | 'messageSent' | 'connectionSent' | 'profileViewed';
-
-export interface DashboardSummary {
-  unreadMessages: number;
-  pendingConnections: number;
-  recentNotifications: number;
-  totalAccounts: number;
-  activeAccounts: number;
-}
+export type ActivityTab = 'all' | 'messageSent' | 'connectionSent' | 'profileViewed' | 'sync';

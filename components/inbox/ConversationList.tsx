@@ -1,192 +1,114 @@
-// FILE: components/inbox/ConversationList.tsx
 'use client';
 
-import { useState, useMemo } from 'react';
-import { Search } from 'lucide-react';
-import { TimeAgo } from '@/components/ui/TimeAgo';
-import { ConversationListSkeleton } from '@/components/ui/SkeletonLoader';
-
-export interface Conversation {
-  id: string;
-  linkedInAccountId: string;
-  participantName: string;
-  participantProfileUrl?: string | null;
-  lastMessageText?: string | null;
-  lastMessageAt?: string | null;
-  lastMessageSentByMe?: boolean;
-  accountDisplayName?: string;
-  unreadCount?: number;
-}
+import { memo } from 'react';
+import type { Conversation, Account } from '@/types/dashboard';
+import { Avatar } from '@/components/ui/Avatar';
+import { UnreadBadge } from '@/components/ui/UnreadBadge';
+import { AccountBadge } from '@/components/ui/AccountBadge';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { FilterBar } from '@/components/ui/FilterBar';
+import { formatRelativeTime } from '@/lib/time-utils';
+import { Inbox, Search } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 interface ConversationListProps {
   conversations: Conversation[];
-  activeId: string | null;
+  accounts: Account[];
+  selected: Conversation | null;
+  filter: string;
+  search: string;
+  onSearchChange: (q: string) => void;
+  onFilterChange: (f: string) => void;
   onSelect: (conv: Conversation) => void;
-  loading: boolean;
-  accounts?: Array<{ id: string; displayName?: string }>;
 }
 
-function nameToColor(name: string): string {
-  const colors = ['#6366f1','#8b5cf6','#ec4899','#f59e0b','#10b981','#0ea5e9','#ef4444'];
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = name.charCodeAt(i) + ((h << 5) - h);
-  return colors[Math.abs(h) % colors.length];
-}
-
-function getInitials(name: string): string {
-  return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
-}
-
-function isRecent(dateStr?: string | null): boolean {
-  if (!dateStr) return false;
-  return Date.now() - new Date(dateStr).getTime() < 24 * 60 * 60 * 1000;
-}
-
-export function ConversationList({
+export const ConversationList = memo(function ConversationList({
   conversations,
-  activeId,
+  accounts,
+  selected,
+  filter,
+  search,
+  onSearchChange,
+  onFilterChange,
   onSelect,
-  loading,
-  accounts = [],
 }: ConversationListProps) {
-  const [search, setSearch] = useState('');
-  const [accountFilter, setAccountFilter] = useState<string | 'all'>('all');
-
-  const filtered = useMemo(() => {
-    let list = conversations;
-    if (accountFilter !== 'all') {
-      list = list.filter(c => c.linkedInAccountId === accountFilter);
-    }
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      list = list.filter(c => c.participantName.toLowerCase().includes(q));
-    }
-    return list;
-  }, [conversations, accountFilter, search]);
+  const totalUnread = conversations.reduce((sum, conversation) => sum + (conversation.unreadCount ?? 0), 0);
+  const filterOptions = [
+    { value: 'all', label: 'All', count: conversations.length },
+    ...accounts.map((account) => ({
+      value: account.id,
+      label: account.displayName || account.id,
+      count: conversations.filter((conversation) => conversation.accountId === account.id).length,
+    })),
+  ];
 
   return (
-    <div className="flex flex-col h-full" style={{ borderRight: '1px solid var(--border)' }}>
-      {/* Search */}
-      <div className="p-3" style={{ borderBottom: '1px solid var(--border)' }}>
+    <div className="flex h-full min-h-0 flex-col bg-[var(--bg-panel)]">
+      <div className="border-b border-[var(--border)] p-4">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold text-[var(--text-primary)]">Messages</h2>
+            <p className="text-xs text-[var(--text-muted)]">
+              {conversations.length} conversation{conversations.length === 1 ? '' : 's'}
+            </p>
+          </div>
+          {totalUnread > 0 && <UnreadBadge count={totalUnread} color="blue" />}
+        </div>
         <div className="relative">
-          <Search
-            size={14}
-            className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
-            style={{ color: 'var(--text-muted)' }}
-          />
+          <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
           <input
-            type="text"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search conversations…"
-            className="w-full pl-9 pr-3 py-2 rounded-xl text-xs outline-none transition-colors"
-            style={{
-              backgroundColor: 'var(--bg-elevated)',
-              border: '1px solid var(--border)',
-              color: 'var(--text-primary)',
-            }}
+            onChange={(event) => onSearchChange(event.target.value)}
+            placeholder="Search conversations"
+            className="app-input h-9 pl-9 pr-3 text-sm"
           />
         </div>
+        {accounts.length > 0 && <FilterBar options={filterOptions} value={filter} onChange={onFilterChange} className="mt-3" />}
       </div>
 
-      {/* Account filter tabs */}
-      {accounts.length > 1 && (
-        <div
-          className="flex gap-1 px-3 py-2 overflow-x-auto"
-          style={{ borderBottom: '1px solid var(--border)' }}
-        >
-          {(['all', ...accounts.map(a => a.id)] as const).map((id) => {
-            const label = id === 'all' ? 'All' : (accounts.find(a => a.id === id)?.displayName ?? id.slice(-4));
-            const active = accountFilter === id;
-            return (
-              <button
-                key={id}
-                onClick={() => setAccountFilter(id)}
-                className="flex-shrink-0 px-2.5 py-1 rounded-lg text-xs font-medium transition-colors"
-                style={{
-                  backgroundColor: active ? 'var(--accent-glow)' : 'transparent',
-                  color: active ? 'var(--accent)' : 'var(--text-muted)',
-                  border: active ? '1px solid rgba(99,102,241,0.3)' : '1px solid transparent',
-                }}
-              >
-                {label}
-              </button>
-            );
-          })}
-        </div>
-      )}
-
-      {/* List */}
-      <div className="flex-1 overflow-y-auto">
-        {loading ? (
-          <ConversationListSkeleton count={7} />
-        ) : filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 gap-2">
-            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>No conversations found</p>
-          </div>
+      <div className="min-h-0 flex-1 overflow-y-auto p-2">
+        {conversations.length === 0 ? (
+          <EmptyState compact icon={<Inbox size={22} />} title="No messages found" description="Try a different search or account filter." />
         ) : (
-          filtered.map((conv) => {
-            const isActive = conv.id === activeId;
-            const hasUnread = !conv.lastMessageSentByMe && isRecent(conv.lastMessageAt);
-            const initials = getInitials(conv.participantName || '?');
-            const avatarBg = nameToColor(conv.participantName || 'U');
+          conversations.map((conversation) => {
+            const isSelected = conversation.conversationId === selected?.conversationId;
+            const timeString = formatRelativeTime(conversation.lastMessage.sentAt);
+            const hasUnread = conversation.unreadCount > 0;
 
             return (
               <button
-                key={conv.id}
-                onClick={() => onSelect(conv)}
-                className="w-full flex items-start gap-3 px-3 py-3 text-left relative transition-colors"
-                style={{
-                  backgroundColor: isActive ? 'var(--accent-glow)' : 'transparent',
-                  borderLeft: isActive ? '2px solid var(--accent)' : '2px solid transparent',
-                }}
-                onMouseEnter={(e) => {
-                  if (!isActive) (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'var(--bg-elevated)';
-                }}
-                onMouseLeave={(e) => {
-                  if (!isActive) (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent';
-                }}
+                key={conversation.conversationId}
+                onClick={() => onSelect(conversation)}
+                className={cn(
+                  'mb-1.5 flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors',
+                  isSelected
+                    ? 'border-[var(--accent)] bg-[var(--accent-soft)]'
+                    : 'border-transparent bg-transparent hover:border-[var(--border)] hover:bg-[var(--bg-hover)]'
+                )}
               >
-                {/* Avatar */}
-                <div
-                  className="w-10 h-10 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
-                  style={{ backgroundColor: avatarBg }}
-                >
-                  {initials}
+                <div className="relative shrink-0">
+                  <Avatar name={conversation.participant.name} size="md" />
+                  {hasUnread && <span className="absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full border-2 border-white bg-[var(--accent)]" />}
                 </div>
 
-                {/* Content */}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-start justify-between gap-1">
-                    <span className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>
-                      {conv.participantName}
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className={cn('truncate text-sm text-[var(--text-primary)]', hasUnread ? 'font-bold' : 'font-semibold')}>
+                      {conversation.participant.name}
                     </span>
-                    {conv.lastMessageAt && (
-                      <TimeAgo timestamp={conv.lastMessageAt!} className="text-[10px] flex-shrink-0 mt-0.5" />
-                    )}
+                    <span className="shrink-0 text-[11px] text-[var(--text-muted)]">{timeString}</span>
                   </div>
-                  <p className="text-xs truncate mt-0.5" style={{ color: 'var(--text-secondary)' }}>
-                    {conv.lastMessageText || 'No messages yet'}
-                  </p>
-                  <div className="flex items-center justify-between mt-1">
-                    {conv.accountDisplayName && (
-                      <span
-                        className="text-[10px] font-medium px-1.5 py-0.5 rounded"
-                        style={{
-                          backgroundColor: 'rgba(99,102,241,0.12)',
-                          color: 'var(--accent)',
-                          border: '1px solid rgba(99,102,241,0.2)',
-                        }}
-                      >
-                        {conv.accountDisplayName}
-                      </span>
-                    )}
-                    {hasUnread && (
-                      <span
-                        className="w-2 h-2 rounded-full ml-auto"
-                        style={{ backgroundColor: 'var(--accent)' }}
-                      />
-                    )}
+
+                  <div className="mt-1 flex items-center gap-2">
+                    <p className={cn('min-w-0 flex-1 truncate text-xs', hasUnread ? 'font-semibold text-[var(--text-secondary)]' : 'text-[var(--text-muted)]')}>
+                      {conversation.lastMessage.sentByMe ? 'You: ' : ''}
+                      {conversation.lastMessage.text}
+                    </p>
+                    {hasUnread && <UnreadBadge count={conversation.unreadCount} color="blue" />}
+                  </div>
+
+                  <div className="mt-2">
+                    <AccountBadge name={conversation.accountId} />
                   </div>
                 </div>
               </button>
@@ -196,4 +118,4 @@ export function ConversationList({
       </div>
     </div>
   );
-}
+});

@@ -1,0 +1,246 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+
+ENV_FILE=".env"
+ACCOUNT_ID=""
+PROFILE_URL=""
+TEXT="Hi, test message from automation"
+ALL_ACCOUNTS=0
+
+usage() {
+  cat <<'EOF'
+Usage:
+  bash deployment/run-send-debug.sh --profile-url <linkedin-profile-url> [--account-id <id>] [--all-accounts] [--text <message>] [--env-file .env]
+
+Example:
+  bash deployment/run-send-debug.sh \
+    --profile-url "https://www.linkedin.com/in/pasala-jaswanth-kumar-reddy/" \
+    --account-id "kanchidhyanasai"
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --profile-url)
+      PROFILE_URL="${2:-}"
+      shift 2
+      ;;
+    --account-id)
+      ACCOUNT_ID="${2:-}"
+      shift 2
+      ;;
+    --text)
+      TEXT="${2:-}"
+      shift 2
+      ;;
+    --all-accounts)
+      ALL_ACCOUNTS=1
+      shift 1
+      ;;
+    --env-file)
+      ENV_FILE="${2:-.env}"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1"
+      usage
+      exit 1
+      ;;
+  esac
+done
+
+if [[ -z "$PROFILE_URL" ]]; then
+  echo "Missing --profile-url"
+  usage
+  exit 1
+fi
+
+if [[ ! -f "$ENV_FILE" ]]; then
+  echo "Missing env file: $ENV_FILE"
+  exit 1
+fi
+
+if [[ "$ALL_ACCOUNTS" != "1" && -z "$ACCOUNT_ID" ]]; then
+  ACCOUNT_ID="$(grep -E '^ACCOUNT_IDS=' "$ENV_FILE" | tail -n 1 | cut -d= -f2- | cut -d, -f1 | xargs || true)"
+fi
+
+if [[ "$ALL_ACCOUNTS" != "1" && -z "$ACCOUNT_ID" ]]; then
+  echo "Could not resolve account id from $ENV_FILE. Pass --account-id."
+  exit 1
+fi
+
+if ! command -v docker >/dev/null 2>&1; then
+  echo "docker not found"
+  exit 1
+fi
+
+if ! docker compose version >/dev/null 2>&1; then
+  echo "docker compose plugin not found"
+  exit 1
+fi
+
+COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file "$ENV_FILE")
+
+TS="$(date -u +%Y%m%dT%H%M%SZ)"
+OUT_DIR="artifacts/send-debug-$TS"
+mkdir -p "$OUT_DIR"
+
+echo "Output directory: $OUT_DIR"
+echo
+
+REBUILD="${RUN_SEND_DEBUG_REBUILD:-0}"
+if [[ "$REBUILD" == "1" ]]; then
+  echo "0) Ensure services are up (rebuild worker/frontend)"
+  "${COMPOSE[@]}" up -d --build worker frontend > "$OUT_DIR/compose-up.txt" 2>&1 || {
+    cat "$OUT_DIR/compose-up.txt"
+    echo "Failed to start services."
+    exit 1
+  }
+else
+  echo "0) Ensure services are up (no rebuild, keep existing session state)"
+  "${COMPOSE[@]}" up -d worker frontend > "$OUT_DIR/compose-up.txt" 2>&1 || {
+    cat "$OUT_DIR/compose-up.txt"
+    echo "Failed to start services."
+    exit 1
+  }
+fi
+
+{
+  echo "RUN_SEND_DEBUG_REBUILD=$REBUILD"
+  echo
+  cat "$OUT_DIR/compose-up.txt"
+} > "$OUT_DIR/compose-up.full.txt"
+
+if [[ "$REBUILD" == "1" ]]; then
+  echo "Services are up (rebuilt)."
+else
+  echo "Services are up (not rebuilt)."
+fi
+echo
+
+has_worker_marker() {
+  local pattern="$1"
+  local file="$2"
+  "${COMPOSE[@]}" exec -T worker sh -lc "grep -q \"$pattern\" \"$file\""
+}
+
+NEEDS_REBUILD=0
+if ! has_worker_marker "message-button search attempt" "/app/src/actions/sendMessageNew.js"; then
+  NEEDS_REBUILD=1
+fi
+if ! has_worker_marker "Messaging must be accessible for automation sends." "/app/src/actions/login.js"; then
+  NEEDS_REBUILD=1
+fi
+
+if [[ "$REBUILD" != "1" && "$NEEDS_REBUILD" == "1" ]]; then
+  echo "0.05) Detected stale worker code in container -> auto rebuild once"
+  "${COMPOSE[@]}" up -d --build worker frontend > "$OUT_DIR/compose-up-rebuild.txt" 2>&1 || {
+    cat "$OUT_DIR/compose-up-rebuild.txt"
+    echo "Failed to rebuild services."
+    exit 1
+  }
+  {
+    echo
+    echo "AUTO_REBUILD_TRIGGERED=1"
+    echo
+    cat "$OUT_DIR/compose-up-rebuild.txt"
+  } >> "$OUT_DIR/compose-up.full.txt"
+  echo "Services rebuilt automatically."
+  echo
+fi
+
+echo "0.1) Session backend hints"
+"${COMPOSE[@]}" logs --tail=120 worker | grep -E "Redis unavailable|in-memory session store|Local disk session store|Prisma|Worker API listening" | tee "$OUT_DIR/session-hints.txt" || true
+echo "Worker browser mode:"
+"${COMPOSE[@]}" exec -T worker sh -lc 'echo "BROWSER_USE_SYSTEM_CHROME=${BROWSER_USE_SYSTEM_CHROME:-unset}"; echo "BROWSER_HEADLESS=${BROWSER_HEADLESS:-unset}"' | tee -a "$OUT_DIR/session-hints.txt" || true
+echo
+
+echo "0.2) Session file in worker container"
+WORKER_CID_BOOT="$("${COMPOSE[@]}" ps -q worker || true)"
+if [[ -n "$WORKER_CID_BOOT" ]]; then
+  docker exec "$WORKER_CID_BOOT" sh -lc 'ls -l /app/.local-sessions.json 2>/dev/null || echo "no /app/.local-sessions.json"' | tee "$OUT_DIR/session-file.txt" || true
+else
+  echo "worker container not found" | tee "$OUT_DIR/session-file.txt"
+fi
+echo
+
+if [[ "$REBUILD" == "1" ]]; then
+  echo "Tip: use default (no rebuild) for repeated tests so imported session is not lost."
+  echo
+fi
+
+echo "1) Services"
+"${COMPOSE[@]}" ps | tee "$OUT_DIR/compose-ps.txt"
+echo
+
+echo "2) Patch presence check inside worker"
+{
+  "${COMPOSE[@]}" exec -T worker sh -lc "grep -n 'message-button search attempt' /app/src/actions/sendMessageNew.js || true"
+  "${COMPOSE[@]}" exec -T worker sh -lc "grep -n 'Messaging must be accessible for automation sends.' /app/src/actions/login.js || true"
+} | tee "$OUT_DIR/patch-check.txt"
+echo
+
+echo "3) Snapshot worker logs (before run)"
+"${COMPOSE[@]}" logs --tail=1200 worker > "$OUT_DIR/worker-before.log" || true
+
+echo "4) Run e2e smoke send"
+set +e
+if [[ "$ALL_ACCOUNTS" == "1" ]]; then
+  bash deployment/e2e-smoke-dual.sh \
+    --profile-url "$PROFILE_URL" \
+    --text "$TEXT" \
+    --env-file "$ENV_FILE" > "$OUT_DIR/e2e.out" 2>&1
+else
+  bash deployment/e2e-smoke.sh \
+    --profile-url "$PROFILE_URL" \
+    --account-id "$ACCOUNT_ID" \
+    --text "$TEXT" \
+    --env-file "$ENV_FILE" > "$OUT_DIR/e2e.out" 2>&1
+fi
+E2E_RC=$?
+set -e
+cat "$OUT_DIR/e2e.out"
+echo
+
+echo "5) Snapshot worker logs (after run)"
+"${COMPOSE[@]}" logs --tail=1800 worker > "$OUT_DIR/worker-after.log" || true
+
+grep -E "sendMessageNew:|NOT_MESSAGEABLE|SEND_NOT_CONFIRMED|SESSION_EXPIRED|screenshot saved|Processing job|Job .* failed|thread fallback|message-button search attempt|composer opened successfully" \
+  "$OUT_DIR/worker-after.log" > "$OUT_DIR/worker-key.log" || true
+
+echo "6) Key worker lines"
+if [[ -s "$OUT_DIR/worker-key.log" ]]; then
+  cat "$OUT_DIR/worker-key.log"
+else
+  echo "(No key lines matched. Check $OUT_DIR/worker-after.log)"
+fi
+echo
+
+echo "7) Copy debug screenshots from worker container"
+WORKER_CID="$("${COMPOSE[@]}" ps -q worker || true)"
+mkdir -p "$OUT_DIR/screenshots"
+if [[ -n "$WORKER_CID" ]]; then
+  docker cp "${WORKER_CID}:/tmp/linkedin-hyper-debug/." "$OUT_DIR/screenshots" >/dev/null 2>&1 || true
+fi
+
+if find "$OUT_DIR/screenshots" -type f | grep -q .; then
+  echo "Screenshots copied to: $OUT_DIR/screenshots"
+else
+  echo "No screenshots found in /tmp/linkedin-hyper-debug"
+fi
+echo
+
+if [[ $E2E_RC -eq 0 ]]; then
+  echo "DONE: E2E completed."
+else
+  echo "DONE WITH ERRORS: E2E failed with exit code $E2E_RC."
+fi
+
+echo "All debug artifacts are in: $OUT_DIR"

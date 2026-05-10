@@ -1,75 +1,76 @@
-// FILE: components/dashboard/RecentActivity.tsx
 'use client';
 
-import { TimeAgo } from '@/components/ui/TimeAgo';
+import { ExternalLink, Eye, MessageSquare, UserPlus } from 'lucide-react';
+import type { ActivityEntry } from '@/types/dashboard';
+import { deriveDisplayName } from '@/lib/display-name';
+import { timeAgo } from '@/lib/utils';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { AccountBadge } from '@/components/ui/AccountBadge';
 
-interface ActivityEntry {
-  type: string;
-  accountId?: string;
-  targetName?: string;
-  timestamp: number;
-  messageLength?: number;
+interface RecentActivityProps {
+  activities: ActivityEntry[];
 }
 
-const TYPE_CONFIG: Record<string, { color: string; label: (e: ActivityEntry) => string }> = {
-  messageSent:    { color: 'var(--success)',    label: (e) => `Sent message to ${e.targetName || 'contact'}` },
-  connectionSent: { color: 'var(--accent)',     label: (e) => `Sent connection to ${e.targetName || 'contact'}` },
-  profileView:    { color: 'var(--warning)',    label: (e) => `Viewed ${e.targetName || 'a profile'}` },
-  sync:           { color: 'var(--text-muted)', label: ()  => 'Inbox synced' },
-  realtime_sync:  { color: 'var(--text-muted)', label: ()  => 'Realtime sync' },
-};
+export function RecentActivity({ activities }: RecentActivityProps) {
+  const getMeta = (type: ActivityEntry['type']) => {
+    switch (type) {
+      case 'messageSent':
+        return { icon: MessageSquare, label: 'Message', color: 'text-[var(--accent)]', bg: 'bg-[var(--accent-soft)]' };
+      case 'connectionSent':
+        return { icon: UserPlus, label: 'Connection', color: 'text-[var(--success)]', bg: 'bg-[var(--success-soft)]' };
+      case 'profileViewed':
+        return { icon: Eye, label: 'Profile view', color: 'text-[var(--info)]', bg: 'bg-[var(--info-soft)]' };
+      default:
+        return { icon: MessageSquare, label: 'Activity', color: 'text-[var(--text-muted)]', bg: 'bg-[var(--bg-subtle)]' };
+    }
+  };
 
-function Dot({ color }: { color: string }) {
-  return (
-    <span
-      className="w-2.5 h-2.5 rounded-full flex-shrink-0 mt-1"
-      style={{ backgroundColor: color }}
-    />
-  );
-}
+  if (activities.length === 0) {
+    return (
+      <div className="app-surface">
+        <EmptyState title="No recent activity" description="Messages, connections, profile views, and sync events will appear here." />
+      </div>
+    );
+  }
 
-function EmptyState() {
   return (
-    <div className="flex flex-col items-center gap-3 py-10 text-center">
-      <svg width="40" height="40" viewBox="0 0 40 40" fill="none" aria-hidden="true">
-        <circle cx="20" cy="20" r="18" stroke="var(--border-strong)" strokeWidth="2" />
-        <path d="M13 20h14M20 13v14" stroke="var(--text-muted)" strokeWidth="2" strokeLinecap="round" />
-      </svg>
-      <p className="text-sm" style={{ color: 'var(--text-muted)' }}>No activity yet</p>
-    </div>
-  );
-}
+    <div className="app-surface overflow-hidden">
+      <div className="border-b border-[var(--border)] px-4 py-3 sm:px-5">
+        <h2 className="text-sm font-semibold text-[var(--text-primary)]">Recent activity</h2>
+      </div>
+      <div className="divide-y divide-[var(--border)]">
+        {activities.slice(0, 10).map((activity, index) => {
+          const meta = getMeta(activity.type);
+          const Icon = meta.icon;
+          const displayName = deriveDisplayName(activity.targetName, activity.targetProfileUrl || '');
 
-export function RecentActivity({ activities }: { activities: ActivityEntry[] }) {
-  return (
-    <div className="rounded-2xl p-5" style={{ backgroundColor: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
-      <h2 className="text-sm font-semibold mb-4" style={{ color: 'var(--text-primary)' }}>Recent Activity</h2>
-      {activities.length === 0 ? (
-        <EmptyState />
-      ) : (
-        <div className="flex flex-col gap-1">
-          {activities.slice(0, 10).map((entry, i) => {
-            const cfg = TYPE_CONFIG[entry.type] ?? TYPE_CONFIG.sync;
-            return (
-              <div key={i} className="flex items-start gap-3 py-2.5" style={{ borderTop: i > 0 ? '1px solid var(--border)' : 'none' }}>
-                <Dot color={cfg.color} />
-                <div className="flex-1 min-w-0">
-                  {entry.accountId && (
-                    <span
-                      className="text-[10px] font-medium px-1.5 py-0.5 rounded mr-2"
-                      style={{ backgroundColor: 'var(--bg-surface)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}
-                    >
-                      {entry.accountId.slice(-6)}
-                    </span>
-                  )}
-                  <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>{cfg.label(entry)}</span>
+          return (
+            <div key={`${activity.accountId}-${activity.timestamp}-${index}`} className="grid gap-3 px-4 py-3 transition-colors hover:bg-[var(--bg-hover)] sm:grid-cols-[1fr_auto] sm:items-center sm:px-5">
+              <div className="flex min-w-0 items-start gap-3">
+                <div className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${meta.bg} ${meta.color}`}>
+                  <Icon size={17} />
                 </div>
-                <TimeAgo timestamp={new Date(entry.timestamp).toISOString()} className="text-[10px] flex-shrink-0 mt-0.5" />
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-semibold text-[var(--text-primary)]">{meta.label}</span>
+                    <AccountBadge name={activity.accountId} />
+                  </div>
+                  <div className="mt-1 flex min-w-0 items-center gap-2">
+                    <p className="truncate text-sm text-[var(--text-secondary)]">{displayName}</p>
+                    {activity.targetProfileUrl && (
+                      <a href={activity.targetProfileUrl} target="_blank" rel="noopener noreferrer" className="shrink-0 text-[var(--accent)]" aria-label="Open profile">
+                        <ExternalLink size={14} />
+                      </a>
+                    )}
+                  </div>
+                  {activity.message && <p className="mt-1 truncate text-xs text-[var(--text-muted)]">{activity.message}</p>}
+                </div>
               </div>
-            );
-          })}
-        </div>
-      )}
+              <span className="text-xs text-[var(--text-muted)] sm:text-right">{timeAgo(activity.timestamp)}</span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

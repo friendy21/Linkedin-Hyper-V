@@ -1,0 +1,84 @@
+'use client';
+
+import { useState, useEffect, useCallback } from 'react';
+import type { ActivityEntry, Account, ActivityTab } from '@/types/dashboard';
+import { getAccounts, getAccountActivity } from '@/lib/api-client';
+import { NotificationFeed } from '@/components/notifications/NotificationFeed';
+import { Spinner } from '@/components/ui/Spinner';
+import { ErrorState } from '@/components/ui/ErrorState';
+import { ExportButton } from '@/components/ui/ExportButton';
+import { PageHeader } from '@/components/ui/PageHeader';
+
+export default function NotificationsPage() {
+  const [entries, setEntries] = useState<ActivityEntry[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [tab, setTab] = useState<ActivityTab>('all');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const { accounts: accs } = await getAccounts();
+      setAccounts(accs);
+
+      // Partial failures should not crash the page.
+      const settledLogs = await Promise.allSettled(
+        accs.map((a) => getAccountActivity(a.id, 0, 100).then((r) => r.entries))
+      );
+
+      const merged = settledLogs
+        .filter((result): result is PromiseFulfilledResult<ActivityEntry[]> => result.status === 'fulfilled')
+        .flatMap((result) => result.value)
+        .sort((a, b) => b.timestamp - a.timestamp);
+
+      setEntries(merged);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load activity');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+    const interval = setInterval(() => {
+      void load();
+    }, 60_000);
+    return () => clearInterval(interval);
+  }, [load]);
+
+  const filtered = tab === 'all' ? entries : entries.filter((e) => e.type === tab);
+
+  if (loading) {
+    return (
+      <div className="flex min-h-[70vh] items-center justify-center">
+        <Spinner size="lg" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return <ErrorState message={error} onRetry={load} />;
+  }
+
+  return (
+    <div className="min-h-full">
+      <PageHeader
+        title="Activity"
+        description={`${entries.length.toLocaleString()} event${entries.length === 1 ? '' : 's'} from messages, connections, views, and sync jobs.`}
+        actions={<ExportButton type="activity" label="Export" size="sm" />}
+      />
+
+      <div className="mx-auto max-w-[1440px] px-4 py-5 sm:px-6 lg:px-8">
+        <NotificationFeed
+          entries={filtered}
+          accounts={accounts}
+          activeTab={tab}
+          onTabChange={setTab}
+          totalUnread={entries.length}
+        />
+      </div>
+    </div>
+  );
+}

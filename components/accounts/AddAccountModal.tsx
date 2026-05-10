@@ -1,262 +1,478 @@
 // FILE: components/accounts/AddAccountModal.tsx
 'use client';
 
-import { useState } from 'react';
-import * as Dialog from '@radix-ui/react-dialog';
-import { X, ChevronLeft } from 'lucide-react';
-import { Button, Spinner } from '@/components/ui/Button';
+import { useEffect, useRef, useState } from 'react';
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from '../ui/dialog';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '../ui/tabs';
 import { CookieInstructions } from './CookieInstructions';
-import { toast } from '@/components/ui/Toast';
+import { validateLinkedInCookies } from '@/lib/validators/cookie-validator';
+import { Loader2, Check, X, Upload, FileText } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import toast from 'react-hot-toast';
 
 interface AddAccountModalProps {
   open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onSuccess?: () => void;
+  onClose: () => void;
+  onSuccess: () => void;
+  existingAccounts: string[];
+  initialAccountId?: string | null;
 }
 
-const PROXY_REGEX = /^https?:\/\/[^:]+:[^@]+@[^:]+:\d+$/;
+export function AddAccountModal({ open, onClose, onSuccess, existingAccounts, initialAccountId = null }: AddAccountModalProps) {
+  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [accountId, setAccountId] = useState('');
+  const [cookiesJson, setCookiesJson] = useState('');
+  const [validation, setValidation] = useState<ReturnType<typeof validateLinkedInCookies> | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [verificationResult, setVerificationResult] = useState<'success' | 'error' | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-type StepState = {
-  name: string;
-  proxyUrl: string;
-  cookieJson: string;
-};
-
-type VerifyResult =
-  | { ok: true; accountId: string }
-  | { ok: false; error: string };
-
-export function AddAccountModal({ open, onOpenChange, onSuccess }: AddAccountModalProps) {
-  const [step, setStep] = useState(0);
-  const [fields, setFields] = useState<StepState>({ name: '', proxyUrl: '', cookieJson: '' });
-  const [errors, setErrors] = useState<Partial<StepState>>({});
-  const [verifying, setVerifying] = useState(false);
-  const [verifyResult, setVerifyResult] = useState<VerifyResult | null>(null);
-
-  const resetModal = () => {
-    setStep(0);
-    setFields({ name: '', proxyUrl: '', cookieJson: '' });
-    setErrors({});
-    setVerifyResult(null);
-  };
-
-  const handleOpenChange = (v: boolean) => {
-    if (!v) resetModal();
-    onOpenChange(v);
-  };
-
-  const validateStep0 = () => {
-    const errs: Partial<StepState> = {};
-    if (!fields.name.trim()) errs.name = 'Display name is required';
-    if (fields.proxyUrl && !PROXY_REGEX.test(fields.proxyUrl)) {
-      errs.proxyUrl = 'Must be http(s)://user:pass@host:port';
+  useEffect(() => {
+    if (!open) return;
+    if (initialAccountId) {
+      setAccountId(initialAccountId);
+      setStep(2);
+      return;
     }
-    setErrors(errs);
-    return Object.keys(errs).length === 0;
+    setStep(1);
+    setAccountId('');
+  }, [open, initialAccountId]);
+
+  const handleClose = () => {
+    setStep(1);
+    setAccountId('');
+    setCookiesJson('');
+    setValidation(null);
+    setVerificationResult(null);
+    onClose();
   };
 
-  const validateStep2 = () => {
+  const handleStep1Next = () => {
+    if (!accountId.trim()) {
+      toast.error('Please enter an account ID');
+      return;
+    }
+    if (!/^[a-z0-9_-]+$/i.test(accountId)) {
+      toast.error('Account ID can only contain letters, numbers, hyphens, and underscores');
+      return;
+    }
+    setStep(2);
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target?.result as string;
+      setCookiesJson(content);
+      validateCookies(content);
+    };
+    reader.readAsText(file);
+  };
+
+  const validateCookies = (json: string) => {
     try {
-      const parsed: unknown = JSON.parse(fields.cookieJson);
-      if (!Array.isArray(parsed) || parsed.length === 0) {
-        setErrors({ cookieJson: 'Must be a non-empty JSON array of cookie objects' });
-        return false;
-      }
-      setErrors({});
-      return true;
+      const parsed = JSON.parse(json);
+      const result = validateLinkedInCookies(parsed);
+      setValidation(result);
     } catch {
-      setErrors({ cookieJson: 'Invalid JSON — paste the cookie array exactly' });
-      return false;
+      setValidation({
+        isValid: false,
+        hasLiAt: false,
+        hasJSessionId: false,
+        errors: ['Invalid JSON format'],
+        warnings: [],
+      });
     }
   };
 
-  const handleVerifyAndSave = async () => {
-    if (!validateStep2()) return;
-    setVerifying(true);
-    setVerifyResult(null);
+  const handleStep2Next = async () => {
+    if (!accountId.trim()) {
+      toast.error('Please enter an account ID');
+      setStep(1);
+      return;
+    }
+
+    if (!validation?.isValid) {
+      toast.error('Please fix cookie validation errors');
+      return;
+    }
+
+    setIsImporting(true);
     try {
-      const res = await fetch('/api/accounts', {
+      const cookies = JSON.parse(cookiesJson);
+      const res = await fetch(`/api/accounts/${accountId}/session`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          displayName: fields.name,
-          proxyUrl: fields.proxyUrl || null,
-          cookies: JSON.parse(fields.cookieJson),
-        }),
+        body: JSON.stringify(cookies),
       });
-      const data: unknown = await res.json();
+
       if (!res.ok) {
-        const msg = typeof data === 'object' && data !== null && 'error' in data
-          ? String((data as Record<string, unknown>).error)
-          : 'Failed to save account';
-        setVerifyResult({ ok: false, error: msg });
-      } else {
-        const accountId = typeof data === 'object' && data !== null && 'id' in data
-          ? String((data as Record<string, unknown>).id)
-          : '';
-        setVerifyResult({ ok: true, accountId });
-        toast.success('Account added successfully!');
-        onSuccess?.();
-        setTimeout(() => handleOpenChange(false), 1200);
+        const data = await res.json();
+        toast.error(data.error || 'Failed to import cookies');
+        setIsImporting(false);
+        return;
       }
+
+      toast.success('Cookies imported successfully');
+      onSuccess();
+      setStep(3);
+      // Auto-start verification
+      handleVerify();
     } catch {
-      setVerifyResult({ ok: false, error: 'Network error — please try again' });
-    } finally {
-      setVerifying(false);
+      toast.error('Network error during import');
+      setIsImporting(false);
     }
   };
 
-  const inputBase = `
-    w-full px-3 py-2.5 rounded-xl text-sm text-[--text-primary] placeholder:text-[--text-muted]
-    bg-[--bg-elevated] border transition-colors outline-none focus:border-[--accent]
-  `;
+  const handleVerify = async () => {
+    setIsVerifying(true);
+    try {
+      const res = await fetch(`/api/accounts/${accountId}/verify`, {
+        method: 'POST',
+      });
 
-  const steps = ['Details', 'Instructions', 'Cookies'];
+      if (res.ok) {
+        setVerificationResult('success');
+        toast.success('Session verified successfully!');
+      } else {
+        const data = await res.json();
+        setVerificationResult('error');
+        toast.error(data.error || 'Verification failed');
+      }
+    } catch {
+      setVerificationResult('error');
+      toast.error('Network error during verification');
+    } finally {
+      setIsVerifying(false);
+    }
+  };
 
   return (
-    <Dialog.Root open={open} onOpenChange={handleOpenChange}>
-      <Dialog.Portal>
-        <Dialog.Overlay
-          className="fixed inset-0 z-40"
-          style={{ backgroundColor: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}
-        />
-        <Dialog.Content
-          className="fixed z-50 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg rounded-2xl p-6 shadow-2xl focus:outline-none"
-          style={{ backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-strong)' }}
-        >
-          {/* Header */}
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <Dialog.Title className="text-base font-semibold" style={{ color: 'var(--text-primary)' }}>
-                Add LinkedIn Account
-              </Dialog.Title>
-              <Dialog.Description className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                Step {step + 1} of {steps.length}
-              </Dialog.Description>
-            </div>
-            <Dialog.Close asChild>
-              <button
-                className="p-1.5 rounded-lg transition-colors hover:bg-white/[0.06]"
-                style={{ color: 'var(--text-muted)' }}
-              >
-                <X size={18} />
-              </button>
-            </Dialog.Close>
-          </div>
+    <Dialog open={open} onOpenChange={handleClose}>
+      <DialogContent className="max-h-[90vh] overflow-y-auto">
+        <DialogTitle>Add LinkedIn Account</DialogTitle>
+        <DialogDescription>
+          Import a new LinkedIn account by providing cookies from your browser.
+        </DialogDescription>
 
-          {/* Step dots */}
-          <div className="flex gap-1.5 mb-6">
-            {steps.map((_, i) => (
+        {/* Step Indicator */}
+        <div className="flex items-center gap-2 mb-6">
+          {[1, 2, 3].map((s) => (
+            <div key={s} className="flex items-center flex-1">
               <div
-                key={i}
-                className="h-1.5 flex-1 rounded-full transition-colors"
-                style={{ backgroundColor: i <= step ? 'var(--accent)' : 'var(--border-strong)' }}
-              />
-            ))}
-          </div>
-
-          {/* Step 0: Details */}
-          {step === 0 && (
-            <div className="space-y-4">
-              <div>
-                <label className="label-xs block mb-1.5">Display Name</label>
-                <input
-                  id="account-name"
-                  type="text"
-                  value={fields.name}
-                  onChange={(e) => setFields(f => ({ ...f, name: e.target.value }))}
-                  placeholder="e.g. John Smith (Sales)"
-                  className={inputBase}
-                  style={{ borderColor: errors.name ? 'rgba(239,68,68,0.5)' : 'var(--border-strong)' }}
-                />
-                {errors.name && <p className="text-xs mt-1" style={{ color: 'var(--danger)' }}>{errors.name}</p>}
-              </div>
-              <div>
-                <label className="label-xs block mb-1.5">Proxy URL <span style={{ color: 'var(--text-muted)' }}>(optional)</span></label>
-                <input
-                  id="account-proxy"
-                  type="text"
-                  value={fields.proxyUrl}
-                  onChange={(e) => setFields(f => ({ ...f, proxyUrl: e.target.value }))}
-                  placeholder="http://user:pass@host:port"
-                  className={inputBase}
-                  style={{ borderColor: errors.proxyUrl ? 'rgba(239,68,68,0.5)' : 'var(--border-strong)' }}
-                />
-                {errors.proxyUrl && <p className="text-xs mt-1" style={{ color: 'var(--danger)' }}>{errors.proxyUrl}</p>}
-              </div>
-            </div>
-          )}
-
-          {/* Step 1: Cookie instructions */}
-          {step === 1 && (
-            <div className="max-h-80 overflow-y-auto pr-1">
-              <CookieInstructions />
-            </div>
-          )}
-
-          {/* Step 2: Paste cookies */}
-          {step === 2 && (
-            <div className="space-y-4">
-              <div>
-                <label className="label-xs block mb-1.5">Cookie JSON</label>
-                <textarea
-                  id="account-cookies"
-                  rows={7}
-                  value={fields.cookieJson}
-                  onChange={(e) => setFields(f => ({ ...f, cookieJson: e.target.value }))}
-                  placeholder='[{"name":"li_at","value":"AQE...","domain":".linkedin.com",...}]'
-                  className={`${inputBase} resize-none font-mono text-xs`}
-                  style={{ borderColor: errors.cookieJson ? 'rgba(239,68,68,0.5)' : 'var(--border-strong)' }}
-                />
-                {errors.cookieJson && <p className="text-xs mt-1" style={{ color: 'var(--danger)' }}>{errors.cookieJson}</p>}
-              </div>
-              {verifyResult && (
-                <div
-                  className="px-3 py-2.5 rounded-lg text-xs"
-                  style={{
-                    backgroundColor: verifyResult.ok ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
-                    border: `1px solid ${verifyResult.ok ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'}`,
-                    color: verifyResult.ok ? 'var(--success)' : 'var(--danger)',
-                  }}
-                >
-                  {verifyResult.ok ? `✓ Account saved successfully` : `✗ ${verifyResult.error}`}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Footer */}
-          <div className="flex gap-2 mt-6">
-            {step > 0 && (
-              <Button variant="ghost" size="md" leftIcon={<ChevronLeft size={15} />} onClick={() => setStep(s => s - 1)}>
-                Back
-              </Button>
-            )}
-            <div className="flex-1" />
-            {step < 2 ? (
-              <Button
-                variant="primary"
-                size="md"
-                onClick={() => {
-                  if (step === 0 && !validateStep0()) return;
-                  setStep(s => s + 1);
+                className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-all ${
+                  step >= s ? 'ring-2 ring-[var(--accent)]' : ''
+                }`}
+                style={{
+                  background: step >= s ? 'var(--accent)' : 'var(--bg-elevated)',
+                  color: step >= s ? 'white' : 'var(--text-muted)',
                 }}
               >
-                Continue
-              </Button>
-            ) : (
-              <Button
-                variant="primary"
-                size="md"
-                loading={verifying}
-                onClick={handleVerifyAndSave}
-              >
-                Verify & Save
-              </Button>
-            )}
-          </div>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+                {s}
+              </div>
+              {s < 3 && (
+                <div
+                  className="flex-1 h-0.5 mx-2"
+                  style={{ background: step > s ? 'var(--accent)' : 'var(--border)' }}
+                />
+              )}
+            </div>
+          ))}
+        </div>
+
+        <AnimatePresence mode="wait">
+          {/* Step 1: Account ID */}
+          {step === 1 && (
+            <motion.div
+              key="step1"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+            >
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>
+                    Account ID
+                  </label>
+                  <input
+                    type="text"
+                    value={accountId}
+                    onChange={(e) => setAccountId(e.target.value)}
+                    placeholder="e.g., alice, bob, my_account"
+                    className="w-full px-4 py-2 rounded-lg border transition-all focus:outline-none focus:ring-2"
+                    style={{
+                      background: 'var(--bg-base)',
+                      borderColor: 'var(--border)',
+                      color: 'var(--text-primary)',
+                    }}
+                    autoFocus
+                  />
+                  <p className="text-xs mt-2" style={{ color: 'var(--text-muted)' }}>
+                    Choose a unique identifier for this account (letters, numbers, hyphens, underscores)
+                  </p>
+                </div>
+
+                {existingAccounts.length > 0 && (
+                  <div
+                    className="p-3 rounded-lg"
+                    style={{ background: 'var(--bg-elevated)' }}
+                  >
+                    <p className="text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>
+                      Existing accounts:
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {existingAccounts.map((id) => (
+                        <span
+                          key={id}
+                          className="px-2 py-1 rounded text-xs"
+                          style={{ background: 'var(--bg-panel)', color: 'var(--text-muted)' }}
+                        >
+                          {id}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <button
+                  onClick={handleStep1Next}
+                  disabled={!accountId.trim()}
+                  className="w-full py-2 rounded-lg font-medium transition-all disabled:opacity-50"
+                  style={{ background: 'var(--accent)', color: 'white' }}
+                >
+                  Next
+                </button>
+              </div>
+            </motion.div>
+          )}
+
+          {/* Step 2: Cookie Import */}
+          {step === 2 && (
+            <motion.div
+              key="step2"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+            >
+              <Tabs defaultValue="paste">
+                <TabsList>
+                  <TabsTrigger value="paste">
+                    <FileText size={14} className="mr-1" /> Paste JSON
+                  </TabsTrigger>
+                  <TabsTrigger value="upload">
+                    <Upload size={14} className="mr-1" /> Upload File
+                  </TabsTrigger>
+                  <TabsTrigger value="instructions">Instructions</TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="paste">
+                  <div className="space-y-4">
+                    <div
+                      className="text-sm px-3 py-2 rounded-lg border"
+                      style={{ borderColor: 'var(--border)', color: 'var(--text-secondary)' }}
+                    >
+                      Importing for account: <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{accountId || '(not set)'}</span>
+                    </div>
+                    <textarea
+                      value={cookiesJson}
+                      onChange={(e) => {
+                        setCookiesJson(e.target.value);
+                        validateCookies(e.target.value);
+                      }}
+                      placeholder='Paste cookie JSON array here...\n[\n  {"name": "li_at", "value": "...", ...}\n]'
+                      className="w-full h-64 px-4 py-3 rounded-lg border font-mono text-sm transition-all focus:outline-none focus:ring-2 resize-none"
+                      style={{
+                        background: 'var(--bg-base)',
+                        borderColor: 'var(--border)',
+                        color: 'var(--text-primary)',
+                      }}
+                    />
+
+                    {validation && (
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          {validation.hasLiAt ? (
+                            <Check size={16} className="text-green-500" />
+                          ) : (
+                            <X size={16} style={{ color: 'var(--color-error-500)' }} />
+                          )}
+                          <span className="text-sm" style={{ color: validation.hasLiAt ? '#22c55e' : '#ef4444' }}>
+                            li_at cookie
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {validation.hasJSessionId ? (
+                            <Check size={16} className="text-green-500" />
+                          ) : (
+                            <X size={16} style={{ color: 'var(--color-error-500)' }} />
+                          )}
+                          <span className="text-sm" style={{ color: validation.hasJSessionId ? '#22c55e' : '#ef4444' }}>
+                            JSESSIONID cookie
+                          </span>
+                        </div>
+                        
+                        {validation.errors.length > 0 && (
+                          <div className="p-3 rounded-lg" style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid #ef4444' }}>
+                            {validation.errors.map((err, i) => (
+                              <p key={i} className="text-sm" style={{ color: 'var(--color-error-500)' }}>{err}</p>
+                            ))}
+                          </div>
+                        )}
+                        
+                        {validation.warnings.length > 0 && (
+                          <div className="p-3 rounded-lg" style={{ background: 'rgba(245, 158, 11, 0.1)', border: '1px solid #f59e0b' }}>
+                            {validation.warnings.map((warn, i) => (
+                              <p key={i} className="text-sm" style={{ color: 'var(--color-warning-500)' }}>{warn}</p>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="upload">
+                  <div className="space-y-4">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept=".json"
+                      onChange={handleFileUpload}
+                      className="hidden"
+                    />
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      className="w-full py-12 border-2 border-dashed rounded-lg transition-all hover:border-opacity-50"
+                      style={{ borderColor: 'var(--border)' }}
+                    >
+                      <Upload size={32} className="mx-auto mb-2" style={{ color: 'var(--text-muted)' }} />
+                      <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                        Click to upload cookies.json file
+                      </p>
+                    </button>
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="instructions">
+                  <CookieInstructions />
+                </TabsContent>
+              </Tabs>
+
+              <div className="flex gap-2 mt-6">
+                <button
+                  onClick={() => setStep(1)}
+                  className="px-4 py-2 rounded-lg border transition-all"
+                  style={{ borderColor: 'var(--border)', color: 'var(--text-secondary)' }}
+                >
+                  Back
+                </button>
+                <button
+                  onClick={handleStep2Next}
+                  disabled={!validation?.isValid || isImporting}
+                  className="flex-1 py-2 rounded-lg font-medium transition-all disabled:opacity-50"
+                  style={{ background: 'var(--accent)', color: 'white' }}
+                >
+                  {isImporting ? (
+                    <span className="flex items-center justify-center gap-2">
+                      <Loader2 size={16} className="animate-spin" />
+                      Importing...
+                    </span>
+                  ) : (
+                    'Import & Verify'
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          )}
+
+          {/* Step 3: Verification */}
+          {step === 3 && (
+            <motion.div
+              key="step3"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              className="text-center py-8"
+            >
+              {isVerifying && (
+                <div>
+                  <Loader2 size={48} className="animate-spin mx-auto mb-4" style={{ color: 'var(--accent)' }} />
+                  <p className="text-lg font-medium mb-2" style={{ color: 'var(--text-primary)' }}>
+                    Verifying session...
+                  </p>
+                  <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+                    This may take 10-30 seconds while we launch a browser and navigate to LinkedIn.
+                  </p>
+                </div>
+              )}
+
+              {!isVerifying && verificationResult === 'success' && (
+                <div>
+                  <div
+                    className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4"
+                    style={{ background: 'rgba(34, 197, 94, 0.1)' }}
+                  >
+                    <Check size={32} className="text-green-500" />
+                  </div>
+                  <p className="text-lg font-medium mb-2" style={{ color: 'var(--text-primary)' }}>
+                    Session Active!
+                  </p>
+                  <p className="text-sm mb-6" style={{ color: 'var(--text-muted)' }}>
+                    Account {accountId} has been successfully added and verified.
+                  </p>
+                  <button
+                    onClick={() => {
+                      onSuccess();
+                      handleClose();
+                    }}
+                    className="px-6 py-2 rounded-lg font-medium"
+                    style={{ background: 'var(--accent)', color: 'white' }}
+                  >
+                    Done
+                  </button>
+                </div>
+              )}
+
+              {!isVerifying && verificationResult === 'error' && (
+                <div>
+                  <div
+                    className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4"
+                    style={{ background: 'rgba(239, 68, 68, 0.1)' }}
+                  >
+                    <X size={32} style={{ color: 'var(--color-error-500)' }} />
+                  </div>
+                  <p className="text-lg font-medium mb-2" style={{ color: 'var(--text-primary)' }}>
+                    Verification Failed
+                  </p>
+                  <p className="text-sm mb-6" style={{ color: 'var(--text-muted)' }}>
+                    The session could not be verified. The cookies may be expired or invalid.
+                  </p>
+                  <div className="flex gap-2 justify-center">
+                    <button
+                      onClick={handleVerify}
+                      className="px-4 py-2 rounded-lg border transition-all"
+                      style={{ borderColor: 'var(--border)', color: 'var(--text-secondary)' }}
+                    >
+                      Retry
+                    </button>
+                    <button
+                      onClick={handleClose}
+                      className="px-4 py-2 rounded-lg font-medium"
+                      style={{ background: 'var(--accent)', color: 'white' }}
+                    >
+                      Close
+                    </button>
+                  </div>
+                </div>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </DialogContent>
+    </Dialog>
   );
 }

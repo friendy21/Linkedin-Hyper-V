@@ -8,17 +8,17 @@ interface AvatarProps {
 }
 
 const sizeClasses: Record<AvatarSize, string> = {
-  xs: 'w-6 h-6 text-[10px]',
-  sm: 'w-8 h-8 text-xs',
-  md: 'w-10 h-10 text-sm',
-  lg: 'w-12 h-12 text-base',
+  xs: 'h-6 w-6 text-[10px]',
+  sm: 'h-8 w-8 text-xs',
+  md: 'h-10 w-10 text-sm',
+  lg: 'h-12 w-12 text-base',
 };
 
 export function Avatar({ name, size = 'md' }: AvatarProps) {
   return (
     <div
-      className={`${sizeClasses[size]} rounded-full flex items-center justify-center font-semibold text-white flex-shrink-0`}
-      style={{ background: 'linear-gradient(135deg, #7c3aed 0%, #4c1d95 100%)' }}
+      className={`${sizeClasses[size]} flex shrink-0 items-center justify-center rounded-full bg-[var(--accent)] font-semibold text-white ring-1 ring-white/70`}
+      title={name}
     >
       {getInitials(name)}
     </div>

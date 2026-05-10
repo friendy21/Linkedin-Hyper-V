@@ -3,27 +3,23 @@ import { cn } from '@/lib/utils';
 
 interface SectionProps extends React.HTMLAttributes<HTMLElement> {
   children: React.ReactNode;
-  background?: 'white' | 'muted' | 'gradient';
+  tone?: 'default' | 'panel' | 'subtle';
 }
 
-export const Section: React.FC<SectionProps> = ({
-  children,
-  background = 'white',
-  className,
-  ...props
-}) => {
-  const backgrounds = {
-    white:    'bg-white',
-    muted:    'bg-cream',
-    gradient: 'bg-gradient-to-b from-white to-cream',
-  };
+export const Section = React.forwardRef<HTMLElement, SectionProps>(
+  ({ children, tone = 'default', className, ...props }, ref) => {
+    const tones = {
+      default: 'bg-transparent',
+      panel: 'bg-[var(--bg-panel)]',
+      subtle: 'bg-[var(--bg-subtle)]',
+    };
 
-  return (
-    <section
-      className={cn('py-12 md:py-16 lg:py-20', backgrounds[background], className)}
-      {...props}
-    >
-      {children}
-    </section>
-  );
-};
+    return (
+      <section ref={ref} className={cn('py-6', tones[tone], className)} {...props}>
+        {children}
+      </section>
+    );
+  }
+);
+
+Section.displayName = 'Section';

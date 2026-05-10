@@ -1,282 +1,251 @@
-// FILE: components/inbox/MessageThread.tsx
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { ExternalLink, ArrowDown } from 'lucide-react';
-import { MessageThreadSkeleton } from '@/components/ui/SkeletonLoader';
-import { useWebSocket } from '@/components/providers/WebSocketProvider';
-
-interface Message {
-  id: string;
-  text: string;
-  sentAt: string;
-  isSentByMe: boolean;
-  senderName?: string;
-  senderId?: string;
-}
-
-interface MessageGroup {
-  isSentByMe: boolean;
-  senderName?: string;
-  messages: Message[];
-  groupTime: string;
-}
-
-interface NewMessageData {
-  conversationId: string;
-  linkedInAccountId: string;
-  participantName?: string;
-  message?: {
-    id: string;
-    text: string;
-    sentAt: string;
-    isSentByMe: boolean;
-  };
-}
+import { useRef, useEffect, useState } from 'react';
+import type { Conversation, Message } from '@/types/dashboard';
+import { Avatar } from '@/components/ui/Avatar';
+import { AccountBadge } from '@/components/ui/AccountBadge';
+import { ReplyInput } from '@/components/inbox/ReplyInput';
+import { sendMessage } from '@/lib/api-client';
+import { formatRelativeTime } from '@/lib/time-utils';
+import { ArrowLeft, CheckCheck, MessageSquare } from 'lucide-react';
+import toast from 'react-hot-toast';
 
 interface MessageThreadProps {
-  conversationId: string;
-  accountId: string;
-  participantName: string;
-  participantProfileUrl?: string | null;
+  conversation: Conversation | null;
+  onMessageSent: (updated: Conversation) => void;
+  onBack?: () => void;
 }
 
-function nameToColor(name: string): string {
-  const colors = ['#6366f1','#8b5cf6','#ec4899','#f59e0b','#10b981','#0ea5e9'];
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = name.charCodeAt(i) + ((h << 5) - h);
-  return colors[Math.abs(h) % colors.length];
-}
-
-function getInitials(name: string): string {
-  return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
-}
-
-function isSameDay(a: string, b: string): boolean {
-  return new Date(a).toDateString() === new Date(b).toDateString();
-}
-
-function formatDaySeparator(dateStr: string): string {
-  const d = new Date(dateStr);
-  const today = new Date();
-  const yesterday = new Date(today);
-  yesterday.setDate(yesterday.getDate() - 1);
-  if (d.toDateString() === today.toDateString()) return 'Today';
-  if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
-  return d.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' });
-}
-
-function formatTime(dateStr: string): string {
-  return new Date(dateStr).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-}
-
-function groupMessages(messages: Message[]): MessageGroup[] {
-  const groups: MessageGroup[] = [];
-  for (const msg of messages) {
-    const last = groups[groups.length - 1];
-    if (last && last.isSentByMe === msg.isSentByMe) {
-      last.messages.push(msg);
-      last.groupTime = msg.sentAt;
-    } else {
-      groups.push({
-        isSentByMe: msg.isSentByMe,
-        senderName: msg.senderName,
-        messages: [msg],
-        groupTime: msg.sentAt,
-      });
-    }
-  }
-  return groups;
-}
-
-export function MessageThread({
-  conversationId,
-  accountId,
-  participantName,
-  participantProfileUrl,
-}: MessageThreadProps) {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [showScrollBtn, setShowScrollBtn] = useState(false);
+export function MessageThread({ conversation, onMessageSent, onBack }: MessageThreadProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
-  const listRef = useRef<HTMLDivElement>(null);
-  const { socket } = useWebSocket();
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const [autoScroll, setAutoScroll] = useState(true);
 
-  const scrollToBottom = useCallback((smooth = true) => {
-    bottomRef.current?.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto' });
-  }, []);
-
-  const fetchThread = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/messages/thread?accountId=${accountId}&chatId=${conversationId}`);
-      if (res.ok) {
-        const data: unknown = await res.json();
-        const msgs = Array.isArray(data)
-          ? data as Message[]
-          : (typeof data === 'object' && data !== null && 'messages' in data)
-          ? (data as { messages: Message[] }).messages
-          : [];
-        setMessages(msgs);
-      }
-    } finally {
-      setLoading(false);
-      requestAnimationFrame(() => scrollToBottom(false));
-    }
-  }, [accountId, conversationId, scrollToBottom]);
-
-  useEffect(() => { fetchThread(); }, [fetchThread]);
-
-  // Subscribe to new messages via socket
   useEffect(() => {
-    if (!socket) return;
+    if (autoScroll) {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [conversation?.messages, autoScroll]);
 
-    const handler = (data: NewMessageData) => {
-      if (data.conversationId !== conversationId) return;
-      if (data.message) {
-        setMessages(prev => [...prev, {
-          id: data.message!.id,
-          text: data.message!.text,
-          sentAt: data.message!.sentAt,
-          isSentByMe: data.message!.isSentByMe,
-        }]);
-        requestAnimationFrame(() => scrollToBottom(true));
-      } else {
-        // fetch fresh if we have no payload
-        fetchThread();
-      }
-    };
-
-    socket.on('inbox:new_message', handler);
-    return () => { socket.off('inbox:new_message', handler); };
-  }, [socket, conversationId, scrollToBottom, fetchThread]);
-
-  // Detect scroll position for "new message" button
   const handleScroll = () => {
-    const el = listRef.current;
-    if (!el) return;
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-    setShowScrollBtn(!atBottom);
+    if (!messagesContainerRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = messagesContainerRef.current;
+    const isNearBottom = scrollHeight - scrollTop - clientHeight < 100;
+    setAutoScroll(isNearBottom);
   };
 
-  const groups = groupMessages(messages);
-  const avatarBg = nameToColor(participantName);
+  if (!conversation) {
+    return (
+      <div className="flex flex-1 items-center justify-center bg-[var(--bg-panel)]">
+        <div className="animate-fade-in px-6 text-center">
+          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-lg bg-[var(--accent-soft)] text-[var(--accent)]">
+            <MessageSquare size={28} />
+          </div>
+          <p className="mb-2 text-lg font-semibold text-[var(--text-primary)]">
+            Select a conversation
+          </p>
+          <p className="text-sm text-[var(--text-muted)]">
+            Choose from the left panel to start messaging
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  const activeConversation: Conversation = conversation;
+  const { participant, accountId, messages } = activeConversation;
+
+  async function handleSend(text: string) {
+    const optimistic: Message = {
+      id: `opt-${Date.now()}`,
+      text,
+      sentAt: Date.now(),
+      sentByMe: true,
+      senderName: accountId,
+    };
+
+    const updatedConversation: Conversation = {
+      ...activeConversation,
+      messages: [...activeConversation.messages, optimistic],
+      lastMessage: { text, sentAt: Date.now(), sentByMe: true },
+    };
+
+    onMessageSent(updatedConversation);
+
+    try {
+      await sendMessage(accountId, activeConversation.conversationId, text);
+    } catch (error) {
+      const withoutOptimistic = updatedConversation.messages.filter((m) => m.id !== optimistic.id);
+      const fallbackLast = withoutOptimistic[withoutOptimistic.length - 1];
+
+      onMessageSent({
+        ...updatedConversation,
+        messages: withoutOptimistic,
+        lastMessage: fallbackLast
+          ? {
+              text: fallbackLast.text,
+              sentAt: fallbackLast.sentAt,
+              sentByMe: fallbackLast.sentByMe,
+            }
+          : activeConversation.lastMessage,
+      });
+
+      toast.error(error instanceof Error ? error.message : 'Failed to send message');
+    }
+  }
+
+  const groupedMessages = groupConsecutiveMessages(messages);
 
   return (
-    <div className="flex flex-col h-full relative">
-      {/* Thread header */}
+    <div className="relative flex min-h-0 flex-1 flex-col bg-[var(--bg-panel)]">
       <div
-        className="flex items-center gap-3 px-4 py-3 flex-shrink-0"
-        style={{ borderBottom: '1px solid var(--border)', backgroundColor: 'var(--bg-surface)' }}
+        className="flex items-center justify-between gap-3 border-b border-[var(--border)] bg-[var(--bg-panel)] px-4 py-3 sm:px-5"
       >
-        <div
-          className="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
-          style={{ backgroundColor: avatarBg }}
-        >
-          {getInitials(participantName)}
+        <div className="flex items-center gap-3 min-w-0">
+          {onBack && (
+            <button onClick={onBack} className="flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--border)] text-[var(--text-muted)] lg:hidden" aria-label="Back to conversations">
+              <ArrowLeft size={18} />
+            </button>
+          )}
+          <Avatar name={participant.name} size="md" />
+          <div className="min-w-0">
+            <h2 className="truncate text-base font-semibold text-[var(--text-primary)]">
+              {participant.name}
+            </h2>
+            <p className="mt-0.5 text-xs text-[var(--text-muted)]">
+              {messages.length} {messages.length === 1 ? 'message' : 'messages'}
+            </p>
+          </div>
         </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{participantName}</p>
-        </div>
-        {participantProfileUrl && (
-          <a
-            href={participantProfileUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="p-1.5 rounded-lg transition-colors hover:bg-white/[0.06]"
-            style={{ color: 'var(--text-muted)' }}
-          >
-            <ExternalLink size={15} />
-          </a>
-        )}
+        <AccountBadge name={accountId} />
       </div>
 
-      {/* Message list */}
       <div
-        ref={listRef}
-        className="flex-1 overflow-y-auto px-4 py-4 space-y-1"
+        ref={messagesContainerRef}
         onScroll={handleScroll}
-        style={{ backgroundColor: 'var(--bg-base)' }}
+        className="min-h-0 flex-1 overflow-y-auto bg-[var(--bg-base)] px-4 py-5 sm:px-6"
       >
-        {loading ? (
-          <MessageThreadSkeleton />
-        ) : messages.length === 0 ? (
-          <div className="flex items-center justify-center h-full">
-            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>No messages yet. Say hello!</p>
-          </div>
-        ) : (
-          <>
-            {groups.map((group, gi) => {
-              const prevGroup = groups[gi - 1];
-              const showDaySep = !prevGroup || !isSameDay(prevGroup.groupTime, group.messages[0].sentAt);
-              return (
-                <div key={gi}>
-                  {showDaySep && (
-                    <div className="flex items-center gap-2 my-4">
-                      <div className="flex-1 h-px" style={{ backgroundColor: 'var(--border)' }} />
-                      <span
-                        className="text-[10px] px-2 sticky top-0"
-                        style={{ color: 'var(--text-muted)' }}
-                      >
-                        {formatDaySeparator(group.messages[0].sentAt)}
-                      </span>
-                      <div className="flex-1 h-px" style={{ backgroundColor: 'var(--border)' }} />
-                    </div>
-                  )}
-                  <div className={`flex gap-2 mb-3 ${group.isSentByMe ? 'flex-row-reverse' : 'flex-row'}`}>
-                    {!group.isSentByMe && (
-                      <div
-                        className="w-8 h-8 rounded-full flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0 mt-auto"
-                        style={{ backgroundColor: avatarBg }}
-                      >
-                        {getInitials(participantName)}
-                      </div>
-                    )}
-                    <div className={`flex flex-col gap-0.5 max-w-[72%] ${group.isSentByMe ? 'items-end' : 'items-start'}`}>
-                      {group.messages.map((msg) => (
-                        <div
-                          key={msg.id}
-                          className="px-3.5 py-2.5 text-sm leading-relaxed"
-                          style={{
-                            backgroundColor: group.isSentByMe ? 'var(--accent)' : 'var(--bg-elevated)',
-                            color: 'var(--text-primary)',
-                            borderRadius: group.isSentByMe ? '1rem 1rem 0.25rem 1rem' : '1rem 1rem 1rem 0.25rem',
-                            wordBreak: 'break-word',
-                          }}
-                        >
-                          {msg.text}
-                        </div>
-                      ))}
-                      <span className="text-[10px] mt-0.5 px-1" style={{ color: 'var(--text-muted)' }}>
-                        {formatTime(group.groupTime)}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </>
-        )}
+        {groupedMessages.map((group, groupIndex) => (
+          <MessageGroup
+            key={groupIndex}
+            messages={group.messages}
+            isSentByMe={group.isSentByMe}
+            senderName={group.senderName}
+          />
+        ))}
         <div ref={bottomRef} />
       </div>
 
-      {/* Scroll to bottom button */}
-      {showScrollBtn && !loading && (
+      {!autoScroll && (
         <button
-          onClick={() => scrollToBottom(true)}
-          className="absolute bottom-20 right-4 p-2 rounded-full shadow-lg transition-colors"
-          style={{
-            backgroundColor: 'var(--accent)',
-            color: 'white',
-            border: '1px solid rgba(99,102,241,0.4)',
+          onClick={() => {
+            setAutoScroll(true);
+            bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
           }}
+          className="absolute bottom-24 right-5 rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white shadow-md transition-colors hover:bg-[var(--accent-hover)]"
         >
-          <ArrowDown size={16} />
+          Jump to latest
         </button>
       )}
+
+      <ReplyInput onSend={handleSend} />
     </div>
   );
 }
 
-// Expose setMessages for parent to call (optimistic append)
-export type { Message };
+function groupConsecutiveMessages(
+  messages: Message[]
+): Array<{ messages: Message[]; isSentByMe: boolean; senderName: string }> {
+  const groups: Array<{ messages: Message[]; isSentByMe: boolean; senderName: string }> = [];
+
+  messages.forEach((message) => {
+    const lastGroup = groups[groups.length - 1];
+    if (
+      lastGroup &&
+      lastGroup.isSentByMe === message.sentByMe &&
+      lastGroup.senderName === message.senderName
+    ) {
+      lastGroup.messages.push(message);
+    } else {
+      groups.push({
+        messages: [message],
+        isSentByMe: message.sentByMe,
+        senderName: message.senderName,
+      });
+    }
+  });
+
+  return groups;
+}
+
+function MessageGroup({
+  messages,
+  isSentByMe,
+  senderName,
+}: {
+  messages: Message[];
+  isSentByMe: boolean;
+  senderName: string;
+}) {
+  return (
+    <div className={`mb-6 flex gap-3 ${isSentByMe ? 'flex-row-reverse' : 'flex-row'}`}>
+      <div className="flex-shrink-0">
+        <Avatar name={senderName} size="sm" />
+      </div>
+
+      <div className={`flex max-w-[82%] flex-col gap-1.5 sm:max-w-[72%] ${isSentByMe ? 'items-end' : 'items-start'}`}>
+        <span className="mb-1 px-2 text-xs font-medium text-[var(--text-muted)]">
+          {senderName}
+        </span>
+
+        {messages.map((message, index) => (
+          <MessageBubble
+            key={message.id}
+            message={message}
+            isSentByMe={isSentByMe}
+            isLast={index === messages.length - 1}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function MessageBubble({
+  message,
+  isSentByMe,
+  isLast,
+}: {
+  message: Message;
+  isSentByMe: boolean;
+  isLast: boolean;
+}) {
+  const { text, sentAt } = message;
+
+  return (
+    <div className="w-full animate-fade-in">
+      <div
+        className={`inline-block px-4 py-3 text-sm leading-relaxed shadow-sm transition-all ${
+          isSentByMe ? 'rounded-2xl rounded-br-sm' : 'rounded-2xl rounded-bl-sm'
+        }`}
+        style={{
+          background: isSentByMe ? 'var(--accent)' : 'var(--bg-panel)',
+          color: isSentByMe ? '#ffffff' : 'var(--text-primary)',
+          maxWidth: '100%',
+          wordBreak: 'break-word',
+        }}
+      >
+        {text}
+      </div>
+
+      {isLast && (
+        <div className={`flex items-center gap-1 mt-1 px-2 ${isSentByMe ? 'justify-end' : 'justify-start'}`}>
+          <span className="text-xs text-[var(--text-muted)]">
+            {formatRelativeTime(sentAt)}
+          </span>
+          {isSentByMe && <CheckCheck size={14} className="text-[var(--accent)]" />}
+        </div>
+      )}
+    </div>
+  );
+}

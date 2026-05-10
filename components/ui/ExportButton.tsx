@@ -1,26 +1,26 @@
-// FILE: components/ui/ExportButton.tsx
-// Reusable export button component with CSV and JSON options
-
 'use client';
 
 import { useState } from 'react';
 import { Download, FileJson, FileSpreadsheet, Loader2 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { cn } from '@/lib/utils';
 
 interface ExportButtonProps {
   type: 'messages' | 'activity';
   accountId?: string;
+  conversationId?: string;
   chatId?: string;
   label?: string;
   variant?: 'default' | 'outline' | 'ghost';
   size?: 'sm' | 'md' | 'lg';
 }
 
-export function ExportButton({ 
-  type, 
-  accountId, 
+export function ExportButton({
+  type,
+  accountId,
+  conversationId,
   chatId,
-  label = 'Export', 
+  label = 'Export',
   variant = 'outline',
   size = 'md',
 }: ExportButtonProps) {
@@ -30,31 +30,31 @@ export function ExportButton({
   async function handleExport(format: 'csv' | 'json') {
     setIsExporting(true);
     setShowMenu(false);
-    
+
     try {
       const response = await fetch(`/api/export/${type}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accountId, chatId, format }),
+        body: JSON.stringify({
+          accountId,
+          conversationId: conversationId || chatId,
+          format,
+        }),
       });
-      
+
       if (!response.ok) {
         const error = await response.json();
         throw new Error(error.error || 'Export failed');
       }
-      
-      // Get filename from Content-Disposition header or generate one
+
       const contentDisposition = response.headers.get('Content-Disposition');
       let filename = `linkedin-${type}-${new Date().toISOString().split('T')[0]}.${format}`;
-      
+
       if (contentDisposition) {
         const filenameMatch = contentDisposition.match(/filename="?(.+)"?/i);
-        if (filenameMatch) {
-          filename = filenameMatch[1];
-        }
+        if (filenameMatch) filename = filenameMatch[1];
       }
-      
-      // Download file
+
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -64,120 +64,59 @@ export function ExportButton({
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      
-      toast.success(`Exported as ${format.toUpperCase()}`, {
-        icon: '📥',
-        duration: 3000,
-      });
+
+      toast.success(`Exported ${format.toUpperCase()}`);
     } catch (error) {
-      console.error('[Export] Error:', error);
-      toast.error(error instanceof Error ? error.message : 'Export failed. Please try again.', {
-        duration: 4000,
-      });
+      toast.error(error instanceof Error ? error.message : 'Export failed. Please try again.');
     } finally {
       setIsExporting(false);
     }
   }
 
-  const sizeClasses = {
-    sm: 'px-3 py-1.5 text-xs',
-    md: 'px-4 py-2 text-sm',
-    lg: 'px-6 py-3 text-base',
+  const sizes = {
+    sm: 'h-8 px-3 text-xs',
+    md: 'h-10 px-4 text-sm',
+    lg: 'h-11 px-5 text-sm',
   };
 
-  const variantStyles = {
-    default: {
-      backgroundColor: 'var(--color-primary-500, #3b82f6)',
-      color: '#ffffff',
-      border: 'none',
-    },
-    outline: {
-      backgroundColor: 'transparent',
-      color: 'var(--text-primary-new, var(--text-primary))',
-      border: '1px solid var(--border-color, var(--border))',
-    },
-    ghost: {
-      backgroundColor: 'transparent',
-      color: 'var(--text-muted-new, var(--text-muted))',
-      border: 'none',
-    },
+  const variants = {
+    default: 'app-button-primary',
+    outline: 'app-button-secondary',
+    ghost: 'app-button-ghost',
   };
 
   return (
     <div className="relative">
       <button
-        onClick={() => setShowMenu(!showMenu)}
+        onClick={() => setShowMenu((open) => !open)}
         disabled={isExporting}
-        className={`flex items-center gap-2 rounded-lg font-medium transition-all ${sizeClasses[size]}`}
-        style={{
-          ...variantStyles[variant],
-          cursor: isExporting ? 'not-allowed' : 'pointer',
-          opacity: isExporting ? 0.6 : 1,
-        }}
-        onMouseEnter={(e) => {
-          if (!isExporting && variant === 'outline') {
-            e.currentTarget.style.backgroundColor = 'var(--color-gray-50, var(--bg-hover))';
-          }
-        }}
-        onMouseLeave={(e) => {
-          if (variant === 'outline') {
-            e.currentTarget.style.backgroundColor = 'transparent';
-          }
-        }}
+        className={cn('app-button disabled:opacity-60', sizes[size], variants[variant])}
       >
         {isExporting ? (
-          <Loader2 size={size === 'sm' ? 14 : size === 'lg' ? 20 : 16} className="animate-spin" />
+          <Loader2 size={size === 'lg' ? 18 : 15} className="animate-spin" />
         ) : (
-          <Download size={size === 'sm' ? 14 : size === 'lg' ? 20 : 16} />
+          <Download size={size === 'lg' ? 18 : 15} />
         )}
-        <span>{isExporting ? 'Exporting...' : label}</span>
+        <span>{isExporting ? 'Exporting' : label}</span>
       </button>
 
-      {/* Dropdown menu */}
       {showMenu && !isExporting && (
         <>
-          {/* Backdrop */}
-          <div 
-            className="fixed inset-0 z-10" 
-            onClick={() => setShowMenu(false)}
-          />
-          
-          {/* Menu */}
-          <div
-            className="absolute right-0 mt-2 w-48 rounded-lg shadow-lg z-20 py-1"
-            style={{
-              backgroundColor: 'var(--bg-secondary, var(--bg-card))',
-              border: '1px solid var(--border-color, var(--border))',
-            }}
-          >
+          <button className="fixed inset-0 z-20 cursor-default" aria-label="Close export menu" onClick={() => setShowMenu(false)} />
+          <div className="absolute right-0 z-30 mt-2 w-48 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-panel)] py-1 shadow-md">
             <button
-              onClick={() => handleExport('csv')}
-              className="w-full flex items-center gap-3 px-4 py-2 text-sm transition-colors text-left"
-              style={{ color: 'var(--text-primary-new, var(--text-primary))' }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = 'var(--color-gray-50, var(--bg-hover))';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = 'transparent';
-              }}
+              onClick={() => void handleExport('csv')}
+              className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
             >
-              <FileSpreadsheet size={16} style={{ color: 'var(--color-success-500, #22c55e)' }} />
-              <span>Export as CSV</span>
+              <FileSpreadsheet size={16} className="text-[var(--success)]" />
+              Export as CSV
             </button>
-            
             <button
-              onClick={() => handleExport('json')}
-              className="w-full flex items-center gap-3 px-4 py-2 text-sm transition-colors text-left"
-              style={{ color: 'var(--text-primary-new, var(--text-primary))' }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = 'var(--color-gray-50, var(--bg-hover))';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = 'transparent';
-              }}
+              onClick={() => void handleExport('json')}
+              className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
             >
-              <FileJson size={16} style={{ color: 'var(--color-primary-500, #3b82f6)' }} />
-              <span>Export as JSON</span>
+              <FileJson size={16} className="text-[var(--accent)]" />
+              Export as JSON
             </button>
           </div>
         </>

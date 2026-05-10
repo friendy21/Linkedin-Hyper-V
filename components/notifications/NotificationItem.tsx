@@ -1,87 +1,80 @@
 'use client';
 
+import type { ComponentType } from 'react';
 import type { ActivityEntry } from '@/types/dashboard';
 import { Avatar } from '@/components/ui/Avatar';
 import { AccountBadge } from '@/components/ui/AccountBadge';
 import { timeAgo } from '@/lib/utils';
-import { MessageSquare, UserPlus, Eye } from 'lucide-react';
+import { deriveDisplayName } from '@/lib/display-name';
+import { Bell, Eye, ExternalLink, MessageSquare, RefreshCw, UserPlus } from 'lucide-react';
 
-const TYPE_META: Record<
-  ActivityEntry['type'],
-  {
-    icon: React.ComponentType<{ size: number; color: string }>;
-    label: string;
-    color: string;
-  }
-> = {
-  messageSent:    { icon: MessageSquare, label: 'Message sent',    color: '#8b7cf8' },
-  connectionSent: { icon: UserPlus,      label: 'Connection sent', color: '#22c55e' },
-  profileViewed:  { icon: Eye,           label: 'Profile viewed',  color: '#f59e0b' },
+type ActivityMeta = {
+  icon: ComponentType<{ size: number; className?: string }>;
+  label: string;
+  tone: string;
+  bg: string;
 };
 
-// Named export — NOT default export. Import as: import { NotificationRow } from './NotificationItem'
+const TYPE_META: Record<string, ActivityMeta> = {
+  messageSent: { icon: MessageSquare, label: 'Message sent', tone: 'text-[var(--accent)]', bg: 'bg-[var(--accent-soft)]' },
+  connectionSent: { icon: UserPlus, label: 'Connection sent', tone: 'text-[var(--success)]', bg: 'bg-[var(--success-soft)]' },
+  profileViewed: { icon: Eye, label: 'Profile viewed', tone: 'text-[var(--info)]', bg: 'bg-[var(--info-soft)]' },
+  sync: { icon: RefreshCw, label: 'Inbox sync', tone: 'text-[var(--warning)]', bg: 'bg-[var(--warning-soft)]' },
+};
+
+const FALLBACK_META: ActivityMeta = {
+  icon: Bell,
+  label: 'Activity',
+  tone: 'text-[var(--text-muted)]',
+  bg: 'bg-[var(--bg-subtle)]',
+};
+
 export function NotificationRow({ entry }: { entry: ActivityEntry }) {
-  const meta = TYPE_META[entry.type];
+  const typeKey = String(entry.type || '');
+  const meta = TYPE_META[typeKey] ?? FALLBACK_META;
   const Icon = meta.icon;
+  const isSyncEntry = typeKey === 'sync';
+  const displayName = isSyncEntry ? `${entry.accountId} synchronization` : deriveDisplayName(entry.targetName, entry.targetProfileUrl || '');
+
+  const summaryText = (() => {
+    if (entry.message) return entry.message;
+    if (isSyncEntry && entry.stats) {
+      const conversations = Number(entry.stats.conversations || 0);
+      const newMessages = Number(entry.stats.newMessages || 0);
+      return `${conversations} conversations, ${newMessages} new messages`;
+    }
+    return '';
+  })();
 
   return (
-    <div
-      className="flex items-start gap-3 px-6 py-4 transition-colors cursor-default"
-      style={{ borderBottom: '1px solid var(--border)' }}
-      onMouseEnter={(e) =>
-        ((e.currentTarget as HTMLDivElement).style.background = 'var(--bg-hover)')
-      }
-      onMouseLeave={(e) =>
-        ((e.currentTarget as HTMLDivElement).style.background = 'transparent')
-      }
-    >
-      {/* Avatar with type icon overlay at bottom-right */}
-      <div className="relative flex-shrink-0">
-        <Avatar name={entry.targetName} size="sm" />
-        <span
-          className="absolute -bottom-0.5 -right-0.5 rounded-full p-0.5"
-          style={{ background: 'var(--bg-panel)' }}
-        >
-          <Icon size={10} color={meta.color} />
-        </span>
-      </div>
-
-      {/* Content */}
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-            {entry.targetName}
+    <div className="grid gap-3 px-4 py-4 transition-colors hover:bg-[var(--bg-hover)] sm:grid-cols-[1fr_auto] sm:items-start sm:px-5">
+      <div className="flex min-w-0 items-start gap-3">
+        <div className="relative shrink-0">
+          <Avatar name={displayName} size="md" />
+          <span className={`absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full border-2 border-white ${meta.bg} ${meta.tone}`}>
+            <Icon size={11} />
           </span>
-          <AccountBadge name={entry.accountId} />
         </div>
-        <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
-          <span style={{ color: meta.color }}>{meta.label}</span>
-          {entry.message
-            ? ` — ${entry.message.slice(0, 80)}${entry.message.length > 80 ? '…' : ''}`
-            : ''}
-        </p>
-        {entry.targetProfileUrl && (
-          <a
-            href={entry.targetProfileUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-[11px] mt-0.5 inline-block truncate max-w-[200px]"
-            style={{ color: 'var(--text-link)' }}
-          >
-            {entry.targetProfileUrl
-              .replace('https://linkedin.com/in/', '')
-              .replace(/\/$/, '')}
-          </a>
-        )}
+
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="truncate text-sm font-semibold text-[var(--text-primary)]">{displayName}</span>
+            <AccountBadge name={entry.accountId} />
+          </div>
+          <p className="mt-1 text-sm text-[var(--text-secondary)]">
+            <span className={`font-semibold ${meta.tone}`}>{meta.label}</span>
+            {summaryText && <span className="text-[var(--text-muted)]"> - {summaryText}</span>}
+          </p>
+          {entry.targetProfileUrl && (
+            <a href={entry.targetProfileUrl} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex max-w-full items-center gap-1.5 truncate text-xs font-semibold text-[var(--accent)]">
+              <ExternalLink size={13} />
+              View profile
+            </a>
+          )}
+        </div>
       </div>
 
-      {/* Timestamp */}
-      <span
-        className="text-[10px] flex-shrink-0 mt-0.5"
-        style={{ color: 'var(--text-muted)' }}
-      >
-        {timeAgo(entry.timestamp)}
-      </span>
+      <span className="text-xs text-[var(--text-muted)] sm:pt-1 sm:text-right">{timeAgo(entry.timestamp)}</span>
     </div>
   );
 }

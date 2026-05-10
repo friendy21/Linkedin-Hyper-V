@@ -1,93 +1,85 @@
 // FILE: worker/src/db/repositories/AccountRepository.js
-// Repository for LinkedInAccount database operations
+// Repository for Account database operations
 
 'use strict';
 
 const { getPrisma } = require('../prisma');
 
-class LinkedInAccountRepository {
+class AccountRepository {
   /**
-   * Get all active LinkedIn accounts with their owner userId
+   * Upsert an account (create if not exists, update if exists)
+   * @param {string} accountId - Account ID
+   * @param {string} displayName - Display name
+   * @returns {Promise<Object>} Account object
    */
-  async getActiveAccounts() {
+  async upsertAccount(accountId, displayName) {
     const prisma = getPrisma();
-    return prisma.linkedInAccount.findMany({
-      where:   { status: 'active' },
-      select:  { id: true, userId: true, displayName: true, linkedinProfileId: true, lastSyncedAt: true, status: true },
-      orderBy: { createdAt: 'asc' },
-    });
-  }
-
-  /**
-   * Get a LinkedIn account by ID, validates ownership via userId
-   */
-  async getByIdAndUser(id, userId) {
-    const prisma = getPrisma();
-    return prisma.linkedInAccount.findFirst({
-      where: { id, userId },
-    });
-  }
-
-  /**
-   * Get all LinkedIn accounts for a user
-   */
-  async getByUserId(userId) {
-    const prisma = getPrisma();
-    return prisma.linkedInAccount.findMany({
-      where:   { userId },
-      orderBy: { createdAt: 'asc' },
-      select:  {
-        id: true, displayName: true, linkedinProfileId: true,
-        status: true, lastSyncedAt: true, sessionExpiresAt: true, createdAt: true,
+    
+    return await prisma.account.upsert({
+      where: { id: accountId },
+      update: { 
+        displayName,
+        updatedAt: new Date(),
+      },
+      create: {
+        id: accountId,
+        displayName,
       },
     });
   }
 
   /**
-   * Create a pending LinkedIn account record (before storageState is captured)
+   * Get all accounts
+   * @returns {Promise<Array>} Array of accounts
    */
-  async createPending(userId) {
+  async getAllAccounts() {
     const prisma = getPrisma();
-    return prisma.linkedInAccount.create({
-      data: { userId, status: 'pending' },
+    
+    return await prisma.account.findMany({
+      orderBy: { createdAt: 'asc' },
     });
   }
 
   /**
-   * Activate a LinkedIn account after successful login capture
+   * Get account by ID
+   * @param {string} accountId - Account ID
+   * @returns {Promise<Object|null>} Account object or null
    */
-  async activate(id, { displayName, linkedinProfileId, encryptedStorageState }) {
+  async getAccountById(accountId) {
     const prisma = getPrisma();
-    return prisma.linkedInAccount.update({
-      where: { id },
-      data: {
-        displayName:           displayName || '',
-        linkedinProfileId:     linkedinProfileId || null,
-        encryptedStorageState,
-        status:                'active',
-        lastSyncedAt:          new Date(),
-      },
+    
+    return await prisma.account.findUnique({
+      where: { id: accountId },
     });
   }
 
   /**
-   * Update lastSyncedAt for an account
+   * Update account's last synced timestamp
+   * @param {string} accountId - Account ID
+   * @param {Date} timestamp - Last synced timestamp
+   * @returns {Promise<Object>} Updated account
    */
-  async updateLastSyncedAt(id, timestamp = new Date()) {
+  async updateLastSyncedAt(accountId, timestamp = new Date()) {
     const prisma = getPrisma();
-    return prisma.linkedInAccount.update({
-      where: { id },
-      data:  { lastSyncedAt: timestamp },
+    
+    return await prisma.account.update({
+      where: { id: accountId },
+      data: { lastSyncedAt: timestamp },
     });
   }
 
   /**
-   * Delete a LinkedIn account and cascade all related data
+   * Delete an account and all related data (cascades to conversations and messages)
+   * @param {string} accountId - Account ID
+   * @returns {Promise<Object>} Deleted account
    */
-  async deleteAccount(id) {
+  async deleteAccount(accountId) {
     const prisma = getPrisma();
-    return prisma.linkedInAccount.delete({ where: { id } });
+    
+    return await prisma.account.delete({
+      where: { id: accountId },
+    });
   }
 }
 
-module.exports = new LinkedInAccountRepository();
+module.exports = new AccountRepository();

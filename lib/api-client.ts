@@ -1,4 +1,5 @@
-import type { Account, Conversation, ActivityEntry, Message } from '@/types/dashboard';
+import type { Account, Conversation, ActivityEntry, Message, Connection } from '@/types/dashboard';
+import { deriveDisplayName } from '@/lib/display-name';
 
 const BASE = '/api';
 
@@ -36,7 +37,21 @@ export async function getAccounts(): Promise<{ accounts: Account[] }> {
 }
 
 export async function getUnifiedInbox(): Promise<{ conversations: Conversation[] }> {
-  return apiFetch<{ conversations: Conversation[] }>('inbox/unified');
+  const payload = await apiFetch<{ conversations: Conversation[] }>('inbox/unified');
+  return {
+    conversations: payload.conversations.map((conv) => ({
+      ...conv,
+      participant: {
+        ...conv.participant,
+        name: deriveDisplayName(conv.participant?.name || 'Unknown', conv.participant?.profileUrl || ''),
+      },
+      lastMessage: {
+        ...conv.lastMessage,
+        text: conv.lastMessage?.text || '',
+      },
+      messages: Array.isArray(conv.messages) ? conv.messages : [],
+    })),
+  };
 }
 
 export async function getConversationThread(
@@ -44,17 +59,30 @@ export async function getConversationThread(
 ): Promise<{ messages: Message[] }> {
   const res = await apiFetch<{
     items: Array<{
-      id: string; chatId: string; senderId: string;
-      text: string; createdAt: string; senderName?: string;
+      id: string;
+      chatId: string;
+      senderId?: string;
+      isSentByMe?: boolean;
+      text: string;
+      createdAt?: string;
+      sentAt?: string;
+      senderName?: string;
     }>;
   }>(`messages/thread?accountId=${encodeURIComponent(accountId)}&chatId=${encodeURIComponent(chatId)}`);
 
   return {
     messages: res.items.map((m) => ({
       id: m.id, text: m.text,
-      sentAt:     new Date(m.createdAt).getTime(),
-      sentByMe:   m.senderId === '__self__',
-      senderName: m.senderId === '__self__' ? (m.senderName || accountId) : (m.senderName || 'Unknown'),
+      sentAt: (() => {
+        const rawTs = m.createdAt ?? m.sentAt;
+        const parsed = rawTs ? new Date(rawTs).getTime() : Date.now();
+        return Number.isFinite(parsed) ? parsed : Date.now();
+      })(),
+      sentByMe: m.senderId === '__self__' || m.isSentByMe === true,
+      senderName:
+        (m.senderId === '__self__' || m.isSentByMe === true)
+          ? (m.senderName || accountId)
+          : (m.senderName || 'Unknown'),
     })),
   };
 }
@@ -73,6 +101,12 @@ export async function getAllAccountsSummary(): Promise<{
 }> {
   // Stats summary revalidates every 60 s — fast enough to feel current.
   return apiFetch('stats/all/summary', { ttl: 60 });
+}
+
+export async function getUnifiedConnections(limit = 300): Promise<{ connections: Connection[] }> {
+  return apiFetch<{ connections: Connection[] }>(
+    `connections/unified?limit=${encodeURIComponent(String(limit))}`
+  );
 }
 
 export async function sendMessage(
